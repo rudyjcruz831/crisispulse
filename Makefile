@@ -1,4 +1,4 @@
-.PHONY: setup sample counts batch test docker-sample docker-live docker-window docker-week
+.PHONY: setup sample counts batch api test docker-sample docker-live docker-window docker-week
 
 setup:
 	python -m venv .venv
@@ -18,8 +18,13 @@ batch:
 	.venv/bin/python -m pipelines.inspect_features --input data/features/hourly_region_features.parquet --output data/features/hourly_region_report.json
 	.venv/bin/python -m pipelines.score_anomalies --input data/features/hourly_region_features.parquet --output data/features/hourly_region_anomalies.parquet --report data/features/hourly_region_anomaly_report.json
 
+api:
+	go run ./cmd/api --addr 127.0.0.1:8080 --data dashboard/data/dashboard.json --allowed-origin http://localhost:3000
+
 test:
 	.venv/bin/python -m pytest
+	go test ./cmd/...
+	cd dashboard && npm test
 
 docker-sample:
 	docker compose run --rm pipeline

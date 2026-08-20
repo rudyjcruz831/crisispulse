@@ -37,6 +37,7 @@ test("server-renders the CrisisPulse evidence dashboard", async () => {
   assert.match(html, /Signals with enough evidence/);
   assert.match(html, /2 normal/i);
   assert.match(html, /Candidate anomalies/);
+  assert.match(html, /Verified local snapshot/);
   assert.match(html, /not an emergency warning system/i);
   assert.doesNotMatch(html, /codex-preview|SkeletonPreview|react-loading-skeleton/i);
 });
