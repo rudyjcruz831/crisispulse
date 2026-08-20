@@ -67,3 +67,26 @@ func TestDownloadIsIdempotent(t *testing.T) {
 		t.Fatal("stored content differs from downloaded content")
 	}
 }
+
+func TestGKGWindowURLsReturnsOldestToNewest(t *testing.T) {
+	urls, err := gkgWindowURLs(
+		"http://data.gdeltproject.org/gdeltv2/20260820144500.gkg.csv.zip",
+		3,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"http://data.gdeltproject.org/gdeltv2/20260820141500.gkg.csv.zip",
+		"http://data.gdeltproject.org/gdeltv2/20260820143000.gkg.csv.zip",
+		"http://data.gdeltproject.org/gdeltv2/20260820144500.gkg.csv.zip",
+	}
+	if len(urls) != len(want) {
+		t.Fatalf("got %d URLs, want %d", len(urls), len(want))
+	}
+	for index := range want {
+		if urls[index] != want[index] {
+			t.Fatalf("URL %d = %q, want %q", index, urls[index], want[index])
+		}
+	}
+}

@@ -7,6 +7,7 @@ The current version costs **$0** to run: it uses local Python, DuckDB, Parquet, 
 ## What works now
 
 - A Go ingestor that discovers and safely downloads the newest GDELT GKG file.
+- Consecutive-window ingestion for up to 96 fifteen-minute files (24 hours).
 - An immutable raw-file layout with SHA-256 checksums and a JSON Lines manifest.
 - A Python cleaner for official GKG ZIP/TSV files and compact headered samples.
 - High/weak flood and wildfire theme classification (the sample run uses high-confidence floods).
@@ -15,7 +16,9 @@ The current version costs **$0** to run: it uses local Python, DuckDB, Parquet, 
 - Compressed Parquet output and DuckDB hourly counts.
 - Conservative cross-domain syndicated-story grouping using URL slugs and six-hour windows.
 - A repeatable JSON quality report for evaluating real GKG files.
-- Fourteen Python tests and two Go tests.
+- Duplicate-adjusted ADM1/hour features with source diversity and velocity.
+- A readable JSON feature report for inspecting the strongest regional signals.
+- Sixteen Python tests and three Go tests.
 
 ## Quick start on Windows
 
@@ -66,6 +69,12 @@ docker compose --profile live run --rm ingestor
 
 Downloaded files go to `data/raw`, and metadata goes to `data/raw/manifest.jsonl`. Running the same file again returns `already_present` rather than downloading a duplicate.
 
+Download the latest two hours as eight consecutive files:
+
+```powershell
+docker compose --profile live run --rm ingestor --intervals 8 --output-dir /app/data/raw
+```
+
 To clean a downloaded ZIP, replace the filename below with the one in `data/raw`:
 
 ```powershell
@@ -74,11 +83,29 @@ To clean a downloaded ZIP, replace the filename below with the one in `data/raw`
 .\.venv\Scripts\python.exe -m pipelines.inspect_clean --input data/clean/live_floods.parquet
 ```
 
+## Multi-file aggregation
+
+After downloading a window, clean it as one batch and build regional/hourly features. The pattern should select only the consecutive files you want to analyze:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\run-batch.ps1
+```
+
+If `data/raw` also contains older windows, pass `-Pattern` to select only the consecutive filenames you want.
+
+The batch cleaner preserves both high and weak matches for auditing, deduplicates exact URLs across all selected files, and recalculates syndicated group sizes across the full window. It produces:
+
+```text
+data/clean/flood_articles_batch.parquet
+data/features/hourly_region_features.parquet
+data/features/hourly_region_report.json
+```
+
 ## Repository map
 
 ```text
 cmd/ingestor/              Go live-file downloader
-pipelines/                 Python cleaning and DuckDB analysis
+pipelines/                 Python cleaning, batch aggregation, features, and reports
 data/sample/               Tiny, versioned GKG-format fixture
 data/raw/                  Immutable downloads (ignored by Git)
 data/clean/                Generated Parquet files (ignored by Git)
@@ -95,6 +122,8 @@ docs/data-dictionary.md    Clean Parquet field definitions
 - The URL-slug grouping catches obvious syndicated copies but is only an estimate, not content-level deduplication.
 - `seen_at` is when GDELT processed a record, not necessarily when the source article was published.
 - Location selection is a transparent starter heuristic, not a full geocoder.
+- ADM1 region IDs use GDELT/FIPS-style country and administrative codes, not guaranteed ISO codes.
+- Two hours of data can verify mechanics but cannot provide a stable anomaly baseline.
 
 ### First live validation
 
@@ -104,4 +133,4 @@ These constraints are deliberate. The next milestone should process several cons
 
 ## Design reference
 
-See [the architecture](docs/architecture.md) for component details, [the data dictionary](docs/data-dictionary.md) for the Parquet schema, and [the first live validation](docs/live-validation-2026-08-20.md) for evidence from a real GKG update.
+See [the architecture](docs/architecture.md) for component details, [the data dictionary](docs/data-dictionary.md) for the Parquet schemas, [the first live validation](docs/live-validation-2026-08-20.md), and [the multi-file validation](docs/multi-file-validation-2026-08-20.md).

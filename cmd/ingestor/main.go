@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	pathpkg "path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -21,11 +22,13 @@ import (
 // GDELT currently publishes this data endpoint over HTTP. The downloaded file
 // receives a SHA-256 checksum in the local manifest for reproducible processing.
 const defaultIndexURL = "http://data.gdeltproject.org/gdeltv2/lastupdate.txt"
+const maxIntervals = 96
 
 type config struct {
 	indexURL  string
 	sourceURL string
 	outputDir string
+	intervals int
 	timeout   time.Duration
 }
 
@@ -52,12 +55,16 @@ func parseFlags() config {
 	flag.StringVar(&cfg.indexURL, "index-url", defaultIndexURL, "GDELT last-update index URL")
 	flag.StringVar(&cfg.sourceURL, "source-url", "", "download this GKG ZIP directly instead of reading the index")
 	flag.StringVar(&cfg.outputDir, "output-dir", "data/raw", "directory for immutable source files")
+	flag.IntVar(&cfg.intervals, "intervals", 1, "number of consecutive 15-minute GKG files, ending at the selected file (maximum 96)")
 	flag.DurationVar(&cfg.timeout, "timeout", 2*time.Minute, "HTTP request timeout")
 	flag.Parse()
 	return cfg
 }
 
 func run(ctx context.Context, cfg config) error {
+	if cfg.intervals < 1 || cfg.intervals > maxIntervals {
+		return fmt.Errorf("intervals must be between 1 and %d", maxIntervals)
+	}
 	client := &http.Client{Timeout: cfg.timeout}
 	sourceURL := cfg.sourceURL
 	if sourceURL == "" {
@@ -68,24 +75,70 @@ func run(ctx context.Context, cfg config) error {
 		}
 	}
 
-	entry, alreadyPresent, err := download(ctx, client, sourceURL, cfg.outputDir)
+	sourceURLs, err := gkgWindowURLs(sourceURL, cfg.intervals)
 	if err != nil {
 		return err
 	}
-	if !alreadyPresent {
-		if err := appendManifest(filepath.Join(cfg.outputDir, "manifest.jsonl"), entry); err != nil {
-			return err
+	results := make([]map[string]any, 0, len(sourceURLs))
+	downloadedFiles := 0
+	alreadyPresentFiles := 0
+	for _, currentURL := range sourceURLs {
+		entry, alreadyPresent, downloadErr := download(ctx, client, currentURL, cfg.outputDir)
+		if downloadErr != nil {
+			return downloadErr
 		}
+		if !alreadyPresent {
+			if err := appendManifest(filepath.Join(cfg.outputDir, "manifest.jsonl"), entry); err != nil {
+				return err
+			}
+			downloadedFiles++
+		} else {
+			alreadyPresentFiles++
+		}
+		results = append(results, map[string]any{
+			"status":     entry.ProcessingStatus,
+			"source_url": entry.SourceURL,
+			"local_path": entry.LocalPath,
+			"sha256":     entry.ChecksumSHA256,
+			"file_size":  entry.FileSize,
+		})
 	}
 
-	result := map[string]any{
-		"status":     entry.ProcessingStatus,
-		"source_url": entry.SourceURL,
-		"local_path": entry.LocalPath,
-		"sha256":     entry.ChecksumSHA256,
-		"file_size":  entry.FileSize,
+	response := map[string]any{
+		"requested_files":       len(sourceURLs),
+		"downloaded_files":      downloadedFiles,
+		"already_present_files": alreadyPresentFiles,
+		"files":                 results,
 	}
-	return json.NewEncoder(os.Stdout).Encode(result)
+	return json.NewEncoder(os.Stdout).Encode(response)
+}
+
+func gkgWindowURLs(latestURL string, intervals int) ([]string, error) {
+	if intervals < 1 || intervals > maxIntervals {
+		return nil, fmt.Errorf("intervals must be between 1 and %d", maxIntervals)
+	}
+	parsed, err := url.Parse(latestURL)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return nil, fmt.Errorf("invalid GKG URL %q", latestURL)
+	}
+	filename := pathpkg.Base(parsed.Path)
+	const suffix = ".gkg.csv.zip"
+	if !strings.HasSuffix(filename, suffix) {
+		return nil, fmt.Errorf("GKG URL has unexpected filename %q", filename)
+	}
+	latestTimestamp, err := time.Parse("20060102150405", strings.TrimSuffix(filename, suffix))
+	if err != nil {
+		return nil, fmt.Errorf("parse GKG filename timestamp: %w", err)
+	}
+
+	urls := make([]string, 0, intervals)
+	for offset := intervals - 1; offset >= 0; offset-- {
+		current := latestTimestamp.Add(-time.Duration(offset) * 15 * time.Minute)
+		candidate := *parsed
+		candidate.Path = pathpkg.Join(pathpkg.Dir(parsed.Path), current.Format("20060102150405")+suffix)
+		urls = append(urls, candidate.String())
+	}
+	return urls, nil
 }
 
 func latestGKGURL(ctx context.Context, client *http.Client, indexURL string) (string, error) {

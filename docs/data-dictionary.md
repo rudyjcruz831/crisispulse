@@ -4,6 +4,7 @@ The starter writes one row per unique canonical article URL. GDELT processing ti
 
 | Column | Type | Meaning |
 |---|---|---|
+| `source_file` | string | GKG filename that supplied the first retained copy of the article. |
 | `record_id` | string | Original GKG record ID, when available. |
 | `article_id` | string | SHA-256 hash of the canonical URL (or raw URL when invalid). |
 | `seen_at` | datetime | Time GDELT processed the record, interpreted as UTC. |
@@ -28,3 +29,25 @@ The starter writes one row per unique canonical article URL. GDELT processing ti
 | `duplicate_group_size` | integer | Number of clean article URLs assigned to the group. |
 
 Current quality flags are `invalid_url`, `invalid_seen_at`, `missing_location`, `invalid_coordinates`, and `multiple_locations`.
+
+## Regional/hourly feature Parquet
+
+| Column | Type | Meaning |
+|---|---|---|
+| `window_start` | datetime | Start of the UTC hourly window. |
+| `region_id` | string | `country_code:adm1_code`, country fallback, or `UNKNOWN`. |
+| `country_code` | string/null | GDELT/FIPS-style country code. |
+| `adm1_code` | string/null | GDELT first-level administrative code. |
+| `disaster_type` | string | Disaster category. |
+| `article_count` | integer | Retained article URLs in the region/hour. |
+| `high_confidence_article_count` | integer | Articles with a high-strength theme match. |
+| `weak_article_count` | integer | Articles retained for auditing with weak-only evidence. |
+| `unique_domain_count` | integer | Distinct source domains. |
+| `estimated_unique_story_count` | integer | Distinct heuristic story groups. |
+| `high_confidence_story_count` | integer | Story groups containing high-strength evidence. |
+| `average_tone` | float/null | Mean GDELT tone value. |
+| `duplicate_ratio` | float | `1 - estimated stories / articles`. |
+| `previous_story_count` | integer/null | Estimated story count in the immediately preceding hour. |
+| `previous_domain_count` | integer/null | Domain count in the immediately preceding hour. |
+| `article_velocity` | integer/null | Current estimated stories minus the previous hour. |
+| `domain_velocity` | integer/null | Current domains minus the previous hour. |

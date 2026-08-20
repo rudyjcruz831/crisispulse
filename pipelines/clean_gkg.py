@@ -1,4 +1,4 @@
-"""Create a small flood-focused silver Parquet dataset from a GDELT GKG file."""
+"""Create a flood-focused silver Parquet dataset from GDELT GKG files."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import io
 import json
 import sys
 import zipfile
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import datetime
@@ -34,6 +34,7 @@ DISASTER_MARKERS = {
 MATCH_STRENGTH = {"weak": 1, "high": 2}
 
 OUTPUT_SCHEMA = {
+    "source_file": pl.String,
     "record_id": pl.String,
     "article_id": pl.String,
     "seen_at": pl.Datetime(time_unit="us"),
@@ -61,6 +62,7 @@ OUTPUT_SCHEMA = {
 
 @dataclass
 class PipelineStats:
+    input_files: int = 0
     input_rows: int = 0
     theme_matched_rows: int = 0
     weak_rows_skipped: int = 0
@@ -173,91 +175,105 @@ def clean_file(
     disaster_type: str = "flood",
     minimum_strength: str = "high",
 ) -> PipelineStats:
+    return clean_files([input_path], output_path, disaster_type, minimum_strength)
+
+
+def clean_files(
+    input_paths: Sequence[Path],
+    output_path: Path,
+    disaster_type: str = "flood",
+    minimum_strength: str = "high",
+) -> PipelineStats:
     if disaster_type not in DISASTER_MARKERS:
         raise ValueError(f"unsupported disaster type: {disaster_type}")
     if minimum_strength not in MATCH_STRENGTH:
         raise ValueError(f"unsupported minimum strength: {minimum_strength}")
-    if not input_path.exists():
-        raise FileNotFoundError(input_path)
+    if not input_paths:
+        raise ValueError("at least one input file is required")
+    for input_path in input_paths:
+        if not input_path.exists():
+            raise FileNotFoundError(input_path)
 
-    stats = PipelineStats()
+    stats = PipelineStats(input_files=len(input_paths))
     records: list[dict[str, object]] = []
     seen_articles: set[str] = set()
 
-    for row in iter_gkg_rows(input_path):
-        stats.input_rows += 1
-        themes = theme_tokens(row)
-        match_strength, matched_themes = classify_disaster(themes, disaster_type)
-        if match_strength is None:
-            continue
-        stats.theme_matched_rows += 1
-        if MATCH_STRENGTH[match_strength] < MATCH_STRENGTH[minimum_strength]:
-            stats.weak_rows_skipped += 1
-            continue
-        stats.disaster_rows += 1
+    for input_path in input_paths:
+        for row in iter_gkg_rows(input_path):
+            stats.input_rows += 1
+            themes = theme_tokens(row)
+            match_strength, matched_themes = classify_disaster(themes, disaster_type)
+            if match_strength is None:
+                continue
+            stats.theme_matched_rows += 1
+            if MATCH_STRENGTH[match_strength] < MATCH_STRENGTH[minimum_strength]:
+                stats.weak_rows_skipped += 1
+                continue
+            stats.disaster_rows += 1
 
-        raw_url = row.get("V2DOCUMENTIDENTIFIER", "").strip()
-        canonical_url = canonicalize_url(raw_url)
-        identity_source = canonical_url or raw_url
-        article_id = hashlib.sha256(identity_source.encode("utf-8")).hexdigest()
-        if article_id in seen_articles:
-            stats.duplicate_rows += 1
-            continue
-        seen_articles.add(article_id)
+            raw_url = row.get("V2DOCUMENTIDENTIFIER", "").strip()
+            canonical_url = canonicalize_url(raw_url)
+            identity_source = canonical_url or raw_url
+            article_id = hashlib.sha256(identity_source.encode("utf-8")).hexdigest()
+            if article_id in seen_articles:
+                stats.duplicate_rows += 1
+                continue
+            seen_articles.add(article_id)
 
-        locations = parse_enhanced_locations(row.get("V2ENHANCEDLOCATIONS"))
-        primary = choose_primary_location(locations)
-        location_count = distinct_location_count(locations)
-        timestamp = parse_timestamp(row.get("V2.1DATE"))
-        duplicate_group_id, duplicate_group_method = story_group(
-            canonical_url, timestamp, disaster_type, article_id
-        )
-        quality_flags: list[str] = []
-        if canonical_url is None:
-            quality_flags.append("invalid_url")
-        if timestamp is None:
-            quality_flags.append("invalid_seen_at")
-        if primary is None:
-            quality_flags.append("missing_location")
-        elif not primary.valid_coordinates:
-            quality_flags.append("invalid_coordinates")
-        if location_count > 1:
-            quality_flags.append("multiple_locations")
+            locations = parse_enhanced_locations(row.get("V2ENHANCEDLOCATIONS"))
+            primary = choose_primary_location(locations)
+            location_count = distinct_location_count(locations)
+            timestamp = parse_timestamp(row.get("V2.1DATE"))
+            duplicate_group_id, duplicate_group_method = story_group(
+                canonical_url, timestamp, disaster_type, article_id
+            )
+            quality_flags: list[str] = []
+            if canonical_url is None:
+                quality_flags.append("invalid_url")
+            if timestamp is None:
+                quality_flags.append("invalid_seen_at")
+            if primary is None:
+                quality_flags.append("missing_location")
+            elif not primary.valid_coordinates:
+                quality_flags.append("invalid_coordinates")
+            if location_count > 1:
+                quality_flags.append("multiple_locations")
 
-        records.append(
-            {
-                "record_id": row.get("GKGRECORDID") or article_id,
-                "article_id": article_id,
-                "seen_at": timestamp,
-                "canonical_url": canonical_url,
-                "source_domain": source_domain(canonical_url)
-                or row.get("V2SOURCECOMMONNAME")
-                or None,
-                "location_name": primary.name if primary else None,
-                "country_code": primary.country_code if primary else None,
-                "adm1_code": primary.adm1_code if primary else None,
-                "adm2_code": primary.adm2_code if primary else None,
-                "latitude": primary.latitude if primary else None,
-                "longitude": primary.longitude if primary else None,
-                "distinct_location_count": location_count,
-                "disaster_type": disaster_type,
-                "disaster_match_strength": match_strength,
-                "matched_disaster_themes": matched_themes,
-                "themes": themes,
-                "tone": parse_tone(row.get("V1.5TONE")),
-                "geo_confidence": (
-                    "coordinates_valid"
-                    if primary and primary.valid_coordinates
-                    else "location_only"
-                    if primary
-                    else "missing"
-                ),
-                "quality_flags": quality_flags,
-                "duplicate_group_id": duplicate_group_id,
-                "duplicate_group_method": duplicate_group_method,
-                "duplicate_group_size": 1,
-            }
-        )
+            records.append(
+                {
+                    "source_file": input_path.name,
+                    "record_id": row.get("GKGRECORDID") or article_id,
+                    "article_id": article_id,
+                    "seen_at": timestamp,
+                    "canonical_url": canonical_url,
+                    "source_domain": source_domain(canonical_url)
+                    or row.get("V2SOURCECOMMONNAME")
+                    or None,
+                    "location_name": primary.name if primary else None,
+                    "country_code": primary.country_code if primary else None,
+                    "adm1_code": primary.adm1_code if primary else None,
+                    "adm2_code": primary.adm2_code if primary else None,
+                    "latitude": primary.latitude if primary else None,
+                    "longitude": primary.longitude if primary else None,
+                    "distinct_location_count": location_count,
+                    "disaster_type": disaster_type,
+                    "disaster_match_strength": match_strength,
+                    "matched_disaster_themes": matched_themes,
+                    "themes": themes,
+                    "tone": parse_tone(row.get("V1.5TONE")),
+                    "geo_confidence": (
+                        "coordinates_valid"
+                        if primary and primary.valid_coordinates
+                        else "location_only"
+                        if primary
+                        else "missing"
+                    ),
+                    "quality_flags": quality_flags,
+                    "duplicate_group_id": duplicate_group_id,
+                    "duplicate_group_method": duplicate_group_method,
+                    "duplicate_group_size": 1,
+                }
+            )
 
     frame = pl.from_dicts(records, schema=OUTPUT_SCHEMA, strict=False)
     if frame.height:
