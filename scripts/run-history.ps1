@@ -31,4 +31,12 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     --input data/history/hourly_region_features.parquet `
     --output data/features/hourly_region_anomalies.parquet `
     --report data/features/hourly_region_anomaly_report.json
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+& $Python -m pipelines.export_dashboard `
+    --clean data/clean/flood_articles_batch.parquet `
+    --features data/history/hourly_region_features.parquet `
+    --anomalies data/features/hourly_region_anomalies.parquet `
+    --anomaly-report data/features/hourly_region_anomaly_report.json `
+    --output dashboard/data/dashboard.json
 exit $LASTEXITCODE

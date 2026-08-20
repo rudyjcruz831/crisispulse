@@ -1,0 +1,52 @@
+{
+  "snapshot": {
+    "window_start": "2026-08-13T19:00:00",
+    "window_end": "2026-08-20T19:00:00",
+    "window_label": "Aug 13–20, 2026",
+    "updated_label": "Aug 20, 19:00 UTC",
+    "clean_articles": 13196,
+    "regions": 400,
+    "hours": 169,
+    "story_groups": 9112,
+    "candidates": 0,
+    "scored_rows": 67600
+  },
+  "parameters": {
+    "lookback_hours": 720,
+    "minimum_history_hours": 168,
+    "z_threshold": 6.0,
+    "minimum_stories": 3,
+    "minimum_domains": 3,
+    "minimum_story_increase": 3
+  },
+  "status_counts": {
+    "insufficient_history": 67200,
+    "below_minimum_support": 398,
+    "normal": 2,
+    "candidate_anomaly": 0
+  },
+  "signals": [
+    {
+      "region": "Hawaii, United States",
+      "code": "US:USHI",
+      "window_start": "2026-08-20T19:00:00",
+      "stories": 5,
+      "domains": 5,
+      "baseline": 4.0,
+      "score": 0.22,
+      "status": "normal",
+      "status_label": "Normal"
+    },
+    {
+      "region": "Unknown region",
+      "code": "UNKNOWN",
+      "window_start": "2026-08-20T19:00:00",
+      "stories": 6,
+      "domains": 6,
+      "baseline": 15.5,
+      "score": -1.83,
+      "status": "normal",
+      "status_label": "Normal"
+    }
+  ]
+}

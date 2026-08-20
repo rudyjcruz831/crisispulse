@@ -22,7 +22,8 @@ The current version costs **$0** to run: it uses local Python, DuckDB, Parquet, 
 - A balanced manual-review CSV with blank relevance and primary-region label fields.
 - A local scorecard for completed relevance and primary-region labels.
 - Conservative rolling median/MAD anomaly candidates with a seven-day history gate.
-- Twenty-four Python tests and three Go tests.
+- A local React evidence dashboard generated from the latest pipeline outputs.
+- Twenty-nine Python tests, four Go tests, and two dashboard rendering tests.
 
 ## Quick start on Windows
 
@@ -138,6 +139,18 @@ The batch command also creates a conservative anomaly-scoring table. It fills mi
 
 The seven-day validation produced the first fully eligible hour: two rows were classified as normal and zero alert candidates were created. This confirms the history gate opens without manufacturing alerts; it does not mean no floods occurred.
 
+## Local dashboard
+
+The history runner refreshes `dashboard/data/dashboard.json` from the real clean, feature, and anomaly outputs. Start the read-only dashboard locally with:
+
+```powershell
+cd dashboard
+npm install
+npm run dev
+```
+
+The dashboard shows current candidate counts, supported regional evidence, scoring readiness, and the alert guardrails. It requires no paid API and never presents an unusual news pattern as a verified disaster.
+
 ## Repository map
 
 ```text
@@ -149,6 +162,7 @@ data/raw/                  Immutable downloads (ignored by Git)
 data/clean/                Generated Parquet files (ignored by Git)
 data/review/               Generated human-labeling CSV files (ignored by Git)
 data/history/              Compact accumulated feature history (ignored by Git)
+dashboard/                 Local React evidence dashboard
 tests/                     Python unit and pipeline tests
 scripts/                   Windows setup, run, and test commands
 docs/architecture.md       Design decisions and data flow

@@ -2,7 +2,7 @@
 
 ## Goal
 
-This starter proves the first local data path for CrisisPulse: ingest or load GDELT GKG records, isolate flood reporting, clean the useful fields, and create a queryable Parquet dataset. It deliberately excludes cloud infrastructure, dashboards, anomaly detection, and machine learning.
+This local MVP ingests GDELT GKG records, isolates flood reporting, builds explainable regional/hourly features, scores history-gated anomaly candidates, and presents the evidence in a read-only dashboard. It deliberately excludes cloud infrastructure and machine learning.
 
 ## Data flow
 
@@ -32,6 +32,12 @@ Included sample TSV                         Optional live GDELT index
                                               |                         |
                                               v                         v
                                     JSON inspection report    history-gated MAD scorer
+                                                                      |
+                                                                      v
+                                                            dashboard JSON export
+                                                                      |
+                                                                      v
+                                                            local React dashboard
 ```
 
 ## Components
@@ -73,6 +79,10 @@ The review builder writes a deterministic CSV sampled in round-robin order acros
 The scorer densifies each observed region/disaster series to hourly rows, filling absent reporting with zero. For every hour it computes a rolling median and median absolute deviation from prior hours only. The default gate requires 168 prior hours, at least three high-confidence story groups, at least three source domains, a story increase of at least three, and a robust-z score of at least `6.0`. When historical MAD is zero, the same history and support gates still apply before a positive jump can become a candidate.
 
 Statuses make readiness explicit: `insufficient_history`, `below_minimum_support`, `normal`, or `candidate_anomaly`. The output is an unusual-reporting candidate list, never a claim that a physical disaster occurred.
+
+### Evidence dashboard
+
+The exporter combines clean-data counts, compact feature history, anomaly parameters, status totals, and the latest supported rows into one small versioned JSON snapshot. The React dashboard server-renders that snapshot as a candidate summary, evidence table, readiness breakdown, and explanation of every alert gate. A history run refreshes the snapshot automatically. The first dashboard is read-only, local, and has no database, authentication, map service, or paid API.
 
 ## Key decisions and limits
 
