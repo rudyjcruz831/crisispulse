@@ -18,7 +18,9 @@ import (
 	"time"
 )
 
-const defaultIndexURL = "https://data.gdeltproject.org/gdeltv2/lastupdate.txt"
+// GDELT currently publishes this data endpoint over HTTP. The downloaded file
+// receives a SHA-256 checksum in the local manifest for reproducible processing.
+const defaultIndexURL = "http://data.gdeltproject.org/gdeltv2/lastupdate.txt"
 
 type config struct {
 	indexURL  string

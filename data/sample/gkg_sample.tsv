@@ -1,6 +1,6 @@
 GKGRECORDID	V2.1DATE	V2SOURCECOMMONNAME	V2DOCUMENTIDENTIFIER	V2ENHANCEDTHEMES	V2ENHANCEDLOCATIONS	V1.5TONE
-sample-001	20260819120000	example.com	https://Example.com/news/veracruz-flood/?utm_source=newsletter#top	NATURAL_DISASTER_FLOOD,120;EVACUATION,220	4#Veracruz, Veracruz, Mexico#MX#MX30#19.1738#-96.1342#-1#80	-4.5,2.1,6.6
-sample-002	20260819121500	example.com	https://example.com/news/veracruz-flood?fbclid=duplicate	NATURAL_DISASTER_FLOOD,90	4#Veracruz, Veracruz, Mexico#MX#MX30#19.1738#-96.1342#-1#55	-4.2,2.0,6.2
-sample-003	20260819121500	firewatch.test	https://firewatch.test/california-update	NATURAL_DISASTER_WILDFIRE,50	3#Redding, California, United States#US#USCA#40.5865#-122.3917#-1#42	-3.0,2.5,5.5
-sample-004	20260819124500	bayou.test	https://bayou.test/weather/high-water?section=local&utm_medium=social	ENV_FLOOD,40;WEATHER,12	3#Baton Rouge, Louisiana, United States#US#USLA#30.4515#-91.1871#-1#32	-2.7,3.0,5.7
-sample-005	20260819130000	regional.test	https://regional.test/river/flood-warning	FLOOD,30	2#Imaginary Region#US#USXX#125.0#-190.0#-1#20	-1.2,2.2,3.4
+sample-001	20260819120000	example.com	https://Example.com/news/veracruz-flood/?utm_source=newsletter#top	NATURAL_DISASTER_FLOOD,120;EVACUATION,220	4#Veracruz, Veracruz, Mexico#MX#MX30##19.1738#-96.1342#-1#80	-4.5,2.1,6.6
+sample-002	20260819121500	example.com	https://example.com/news/veracruz-flood?fbclid=duplicate	NATURAL_DISASTER_FLOOD,90	4#Veracruz, Veracruz, Mexico#MX#MX30##19.1738#-96.1342#-1#55	-4.2,2.0,6.2
+sample-003	20260819121500	firewatch.test	https://firewatch.test/california-update	NATURAL_DISASTER_WILDFIRE,50	3#Redding, California, United States#US#USCA#CA089#40.5865#-122.3917#-1#42	-3.0,2.5,5.5
+sample-004	20260819124500	bayou.test	https://bayou.test/weather/high-water?section=local&utm_medium=social	ENV_FLOOD,40;WEATHER,12	3#Baton Rouge, Louisiana, United States#US#USLA#LA033#30.4515#-91.1871#-1#32	-2.7,3.0,5.7
+sample-005	20260819130000	regional.test	https://regional.test/river/flood-warning	FLOOD,30	2#Imaginary Region#US#USXX##125.0#-190.0#-1#20	-1.2,2.2,3.4

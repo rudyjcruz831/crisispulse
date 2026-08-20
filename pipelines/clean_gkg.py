@@ -18,14 +18,20 @@ from pathlib import Path
 import polars as pl
 
 from pipelines.canonicalize_urls import canonicalize_url, source_domain
+from pipelines.deduplicate import story_group
 from pipelines.gdelt_schema import GKG_COLUMNS
-from pipelines.parse_locations import choose_primary_location, parse_enhanced_locations
+from pipelines.parse_locations import (
+    choose_primary_location,
+    distinct_location_count,
+    parse_enhanced_locations,
+)
 
 
 DISASTER_MARKERS = {
     "flood": ("FLOOD",),
     "wildfire": ("WILDFIRE", "FOREST_FIRE", "WILD_FIRE"),
 }
+MATCH_STRENGTH = {"weak": 1, "high": 2}
 
 OUTPUT_SCHEMA = {
     "record_id": pl.String,
@@ -35,19 +41,29 @@ OUTPUT_SCHEMA = {
     "source_domain": pl.String,
     "location_name": pl.String,
     "country_code": pl.String,
+    "adm1_code": pl.String,
+    "adm2_code": pl.String,
     "latitude": pl.Float64,
     "longitude": pl.Float64,
+    "distinct_location_count": pl.Int64,
     "disaster_type": pl.String,
+    "disaster_match_strength": pl.String,
+    "matched_disaster_themes": pl.List(pl.String),
     "themes": pl.List(pl.String),
     "tone": pl.Float64,
     "geo_confidence": pl.String,
     "quality_flags": pl.List(pl.String),
+    "duplicate_group_id": pl.String,
+    "duplicate_group_method": pl.String,
+    "duplicate_group_size": pl.Int64,
 }
 
 
 @dataclass
 class PipelineStats:
     input_rows: int = 0
+    theme_matched_rows: int = 0
+    weak_rows_skipped: int = 0
     disaster_rows: int = 0
     duplicate_rows: int = 0
     output_rows: int = 0
@@ -83,9 +99,32 @@ def theme_tokens(row: dict[str, str]) -> list[str]:
     return tokens
 
 
-def matches_disaster(themes: list[str], disaster_type: str) -> bool:
+def classify_disaster(themes: list[str], disaster_type: str) -> tuple[str | None, list[str]]:
     markers = DISASTER_MARKERS[disaster_type]
-    return any(marker in theme for theme in themes for marker in markers)
+    matched = [theme for theme in themes if any(marker in theme for marker in markers)]
+    if not matched:
+        return None, []
+
+    if disaster_type == "flood":
+        strong_suffixes = ("_FLOOD", "_FLOODS", "_FLOODING", "_FLASH_FLOODS")
+        high = any(
+            theme == "FLOOD"
+            or (theme.endswith(strong_suffixes) and not theme.startswith("WB_"))
+            for theme in matched
+        )
+    else:
+        high = any(
+            theme.endswith(("_WILDFIRE", "_WILDFIRES", "_FOREST_FIRE", "_WILD_FIRE"))
+            for theme in matched
+        )
+    return ("high" if high else "weak"), matched
+
+
+def matches_disaster(
+    themes: list[str], disaster_type: str, minimum_strength: str = "high"
+) -> bool:
+    strength, _ = classify_disaster(themes, disaster_type)
+    return bool(strength and MATCH_STRENGTH[strength] >= MATCH_STRENGTH[minimum_strength])
 
 
 @contextmanager
@@ -128,9 +167,16 @@ def iter_gkg_rows(path: Path) -> Iterator[dict[str, str]]:
             yield dict(zip(header, values, strict=False))
 
 
-def clean_file(input_path: Path, output_path: Path, disaster_type: str = "flood") -> PipelineStats:
+def clean_file(
+    input_path: Path,
+    output_path: Path,
+    disaster_type: str = "flood",
+    minimum_strength: str = "high",
+) -> PipelineStats:
     if disaster_type not in DISASTER_MARKERS:
         raise ValueError(f"unsupported disaster type: {disaster_type}")
+    if minimum_strength not in MATCH_STRENGTH:
+        raise ValueError(f"unsupported minimum strength: {minimum_strength}")
     if not input_path.exists():
         raise FileNotFoundError(input_path)
 
@@ -141,7 +187,12 @@ def clean_file(input_path: Path, output_path: Path, disaster_type: str = "flood"
     for row in iter_gkg_rows(input_path):
         stats.input_rows += 1
         themes = theme_tokens(row)
-        if not matches_disaster(themes, disaster_type):
+        match_strength, matched_themes = classify_disaster(themes, disaster_type)
+        if match_strength is None:
+            continue
+        stats.theme_matched_rows += 1
+        if MATCH_STRENGTH[match_strength] < MATCH_STRENGTH[minimum_strength]:
+            stats.weak_rows_skipped += 1
             continue
         stats.disaster_rows += 1
 
@@ -156,7 +207,11 @@ def clean_file(input_path: Path, output_path: Path, disaster_type: str = "flood"
 
         locations = parse_enhanced_locations(row.get("V2ENHANCEDLOCATIONS"))
         primary = choose_primary_location(locations)
+        location_count = distinct_location_count(locations)
         timestamp = parse_timestamp(row.get("V2.1DATE"))
+        duplicate_group_id, duplicate_group_method = story_group(
+            canonical_url, timestamp, disaster_type, article_id
+        )
         quality_flags: list[str] = []
         if canonical_url is None:
             quality_flags.append("invalid_url")
@@ -166,7 +221,7 @@ def clean_file(input_path: Path, output_path: Path, disaster_type: str = "flood"
             quality_flags.append("missing_location")
         elif not primary.valid_coordinates:
             quality_flags.append("invalid_coordinates")
-        if len(locations) > 1:
+        if location_count > 1:
             quality_flags.append("multiple_locations")
 
         records.append(
@@ -180,9 +235,14 @@ def clean_file(input_path: Path, output_path: Path, disaster_type: str = "flood"
                 or None,
                 "location_name": primary.name if primary else None,
                 "country_code": primary.country_code if primary else None,
+                "adm1_code": primary.adm1_code if primary else None,
+                "adm2_code": primary.adm2_code if primary else None,
                 "latitude": primary.latitude if primary else None,
                 "longitude": primary.longitude if primary else None,
+                "distinct_location_count": location_count,
                 "disaster_type": disaster_type,
+                "disaster_match_strength": match_strength,
+                "matched_disaster_themes": matched_themes,
                 "themes": themes,
                 "tone": parse_tone(row.get("V1.5TONE")),
                 "geo_confidence": (
@@ -193,12 +253,17 @@ def clean_file(input_path: Path, output_path: Path, disaster_type: str = "flood"
                     else "missing"
                 ),
                 "quality_flags": quality_flags,
+                "duplicate_group_id": duplicate_group_id,
+                "duplicate_group_method": duplicate_group_method,
+                "duplicate_group_size": 1,
             }
         )
 
     frame = pl.from_dicts(records, schema=OUTPUT_SCHEMA, strict=False)
     if frame.height:
-        frame = frame.sort(["seen_at", "article_id"], nulls_last=True)
+        frame = frame.with_columns(
+            pl.len().over("duplicate_group_id").cast(pl.Int64).alias("duplicate_group_size")
+        ).sort(["seen_at", "article_id"], nulls_last=True)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     frame.write_parquet(output_path, compression="zstd")
     stats.output_rows = frame.height
@@ -210,12 +275,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--input", type=Path, required=True, help="GKG TSV/CSV or ZIP file")
     parser.add_argument("--output", type=Path, required=True, help="clean Parquet destination")
     parser.add_argument("--disaster", choices=sorted(DISASTER_MARKERS), default="flood")
+    parser.add_argument(
+        "--minimum-strength",
+        choices=sorted(MATCH_STRENGTH),
+        default="high",
+        help="high excludes ambiguous theme-only matches such as metaphorical 'flooded'",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    stats = clean_file(args.input, args.output, args.disaster)
+    stats = clean_file(args.input, args.output, args.disaster, args.minimum_strength)
     print(json.dumps({**asdict(stats), "output": str(args.output)}, indent=2))
 
 

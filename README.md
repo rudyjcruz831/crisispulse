@@ -9,11 +9,13 @@ The current version costs **$0** to run: it uses local Python, DuckDB, Parquet, 
 - A Go ingestor that discovers and safely downloads the newest GDELT GKG file.
 - An immutable raw-file layout with SHA-256 checksums and a JSON Lines manifest.
 - A Python cleaner for official GKG ZIP/TSV files and compact headered samples.
-- Flood and wildfire theme filtering (the sample run uses floods).
+- High/weak flood and wildfire theme classification (the sample run uses high-confidence floods).
 - URL canonicalization, source-domain extraction, exact deduplication, and location parsing.
 - Quality flags that preserve questionable records instead of silently deleting them.
 - Compressed Parquet output and DuckDB hourly counts.
-- Seven Python tests and two Go tests.
+- Conservative cross-domain syndicated-story grouping using URL slugs and six-hour windows.
+- A repeatable JSON quality report for evaluating real GKG files.
+- Fourteen Python tests and two Go tests.
 
 ## Quick start on Windows
 
@@ -69,6 +71,7 @@ To clean a downloaded ZIP, replace the filename below with the one in `data/raw`
 ```powershell
 .\.venv\Scripts\python.exe -m pipelines.clean_gkg --input data/raw/20260819120000.gkg.csv.zip --output data/clean/live_floods.parquet --disaster flood
 .\.venv\Scripts\python.exe -m pipelines.hourly_counts --input data/clean/live_floods.parquet
+.\.venv\Scripts\python.exe -m pipelines.inspect_clean --input data/clean/live_floods.parquet
 ```
 
 ## Repository map
@@ -88,13 +91,17 @@ docs/data-dictionary.md    Clean Parquet field definitions
 ## Important limitations
 
 - GDELT measures news reporting, not physical hazard sensors.
-- The first flood rule matches GKG themes containing `FLOOD`; it needs evaluation on real data.
-- Exact URL deduplication does not yet identify syndicated copies across different domains.
+- The high-confidence flood rule removes the weakest theme matches, but GDELT themes can still reflect metaphorical or background references.
+- The URL-slug grouping catches obvious syndicated copies but is only an estimate, not content-level deduplication.
 - `seen_at` is when GDELT processed a record, not necessarily when the source article was published.
 - Location selection is a transparent starter heuristic, not a full geocoder.
 
-These constraints are deliberate. The next milestone should validate the flood filter on a small real GKG file, then improve multi-location handling and cross-domain story deduplication before adding anomaly scores.
+### First live validation
+
+The cleaner has been exercised against a current 15-minute GKG update. That run exposed and fixed the live nine-field `V2ENHANCEDLOCATIONS` layout (including ADM2), and showed that `NATURAL_DISASTER_FLOODED` often describes metaphorical flooding. Both cases are now covered by regression tests. Live ZIPs and generated Parquet files remain local and are excluded from Git.
+
+These constraints are deliberate. The next milestone should process several consecutive GKG updates and build duplicate-adjusted regional/hourly features before adding an anomaly baseline.
 
 ## Design reference
 
-See [the architecture](docs/architecture.md) for component details and [the data dictionary](docs/data-dictionary.md) for the Parquet schema.
+See [the architecture](docs/architecture.md) for component details, [the data dictionary](docs/data-dictionary.md) for the Parquet schema, and [the first live validation](docs/live-validation-2026-08-20.md) for evidence from a real GKG update.
