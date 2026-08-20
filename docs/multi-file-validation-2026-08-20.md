@@ -55,6 +55,24 @@ The initial region key is GDELT country plus ADM1 code, falling back to country 
 
 These results validate the mechanics, not signal accuracy. Two hours are not enough for an anomaly baseline.
 
+## Location-quality follow-up
+
+The next milestone reran the same eight files with conservative regional selection. A named region is now allowed only when all usable mentions agree or the leading region has at least twice as many mentions as the runner-up.
+
+| Measurement | Result |
+|---|---:|
+| Single-region assignments | 29 |
+| Mention-dominant assignments | 92 |
+| Ambiguous regional assignments | 55 |
+| Missing regional assignments | 24 |
+| Articles routed to location review | 79 |
+| Named/unknown feature rows | 67 |
+| Feature regions including `UNKNOWN` | 56 |
+
+The questionable Hawaii story still retains `Big Island, New Hampshire` as the selected audit value in clean data, but its tied candidate regions make the assignment ambiguous. It is now aggregated into `UNKNOWN`; the feature output contains zero `US:USNH` rows. This preserves the evidence without allowing a questionable primary-location choice to create a regional signal.
+
+The generated 40-row review CSV contains ten rows from each of four buckets: high/assigned, high/location-review, weak/assigned, and weak/location-review. Its relevance, primary-region, and notes columns are intentionally blank for human labels.
+
 ## Reproduce locally
 
 Download the most recent two-hour window:
@@ -76,8 +94,9 @@ Generated outputs:
 data/clean/flood_articles_batch.parquet
 data/features/hourly_region_features.parquet
 data/features/hourly_region_report.json
+data/review/flood_manual_review.csv
 ```
 
 ## Next validation
 
-Create a small manually labeled review set for high and weak matches, improve ambiguous multi-location handling, and collect enough hourly windows for a robust median/MAD baseline. No anomaly threshold should be presented as meaningful from this two-hour sample.
+Label the 40-row review CSV, measure disaster-match and regional-assignment quality by bucket, and use the results to tune the theme and location rules. Then collect enough hourly windows for a robust median/MAD baseline. No anomaly threshold should be presented as meaningful from this two-hour sample.

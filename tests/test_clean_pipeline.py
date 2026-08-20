@@ -30,6 +30,7 @@ def test_flood_pipeline_filters_canonicalizes_and_deduplicates(tmp_path: Path) -
     ]
     assert "invalid_coordinates" in frame.row(2, named=True)["quality_flags"]
     assert frame.row(1, named=True)["adm2_code"] == "LA033"
+    assert frame["location_selection_status"].to_list() == ["single_region"] * 3
 
 
 def test_hourly_counts_uses_gdelt_seen_time(tmp_path: Path) -> None:
@@ -74,4 +75,6 @@ def test_quality_report_summarizes_clean_data(tmp_path: Path) -> None:
     assert report["unique_domain_count"] == 3
     assert report["estimated_unique_story_count"] == 3
     assert report["invalid_coordinate_count"] == 1
+    assert report["ambiguous_region_count"] == 0
+    assert report["location_review_count"] == 0
     assert len(report["top_locations"]) == 2

@@ -12,13 +12,16 @@ The current version costs **$0** to run: it uses local Python, DuckDB, Parquet, 
 - A Python cleaner for official GKG ZIP/TSV files and compact headered samples.
 - High/weak flood and wildfire theme classification (the sample run uses high-confidence floods).
 - URL canonicalization, source-domain extraction, exact deduplication, and location parsing.
+- Explicit `single`, `dominant`, `ambiguous`, `unresolved`, or `missing` regional selection status.
 - Quality flags that preserve questionable records instead of silently deleting them.
 - Compressed Parquet output and DuckDB hourly counts.
 - Conservative cross-domain syndicated-story grouping using URL slugs and six-hour windows.
 - A repeatable JSON quality report for evaluating real GKG files.
 - Duplicate-adjusted ADM1/hour features with source diversity and velocity.
 - A readable JSON feature report for inspecting the strongest regional signals.
-- Sixteen Python tests and three Go tests.
+- A balanced manual-review CSV with blank relevance and primary-region label fields.
+- A local scorecard for completed relevance and primary-region labels.
+- Twenty-one Python tests and three Go tests.
 
 ## Quick start on Windows
 
@@ -99,6 +102,17 @@ The batch cleaner preserves both high and weak matches for auditing, deduplicate
 data/clean/flood_articles_batch.parquet
 data/features/hourly_region_features.parquet
 data/features/hourly_region_report.json
+data/review/flood_manual_review.csv
+```
+
+The review CSV is deterministic and round-robins across high/weak matches and assigned/questionable locations. Fill in `label_disaster_relevance`, `label_primary_region`, and `review_notes`; generated review files remain local and are ignored by Git.
+
+After labeling, calculate the review scorecard:
+
+```powershell
+.\.venv\Scripts\python.exe -m pipelines.evaluate_review `
+  --input data/review/flood_manual_review.csv `
+  --output data/review/flood_review_report.json
 ```
 
 ## Repository map
@@ -109,6 +123,7 @@ pipelines/                 Python cleaning, batch aggregation, features, and rep
 data/sample/               Tiny, versioned GKG-format fixture
 data/raw/                  Immutable downloads (ignored by Git)
 data/clean/                Generated Parquet files (ignored by Git)
+data/review/               Generated human-labeling CSV files (ignored by Git)
 tests/                     Python unit and pipeline tests
 scripts/                   Windows setup, run, and test commands
 docs/architecture.md       Design decisions and data flow
@@ -121,7 +136,7 @@ docs/data-dictionary.md    Clean Parquet field definitions
 - The high-confidence flood rule removes the weakest theme matches, but GDELT themes can still reflect metaphorical or background references.
 - The URL-slug grouping catches obvious syndicated copies but is only an estimate, not content-level deduplication.
 - `seen_at` is when GDELT processed a record, not necessarily when the source article was published.
-- Location selection is a transparent starter heuristic, not a full geocoder.
+- Location selection is a transparent starter heuristic, not a full geocoder. Tied multi-region articles are routed to `UNKNOWN` until reviewed.
 - ADM1 region IDs use GDELT/FIPS-style country and administrative codes, not guaranteed ISO codes.
 - Two hours of data can verify mechanics but cannot provide a stable anomaly baseline.
 
@@ -129,7 +144,7 @@ docs/data-dictionary.md    Clean Parquet field definitions
 
 The cleaner has been exercised against a current 15-minute GKG update. That run exposed and fixed the live nine-field `V2ENHANCEDLOCATIONS` layout (including ADM2), and showed that `NATURAL_DISASTER_FLOODED` often describes metaphorical flooding. Both cases are now covered by regression tests. Live ZIPs and generated Parquet files remain local and are excluded from Git.
 
-These constraints are deliberate. The next milestone should process several consecutive GKG updates and build duplicate-adjusted regional/hourly features before adding an anomaly baseline.
+These constraints are deliberate. The next milestone is to label the generated review set and collect enough hourly windows for a robust anomaly baseline.
 
 ## Design reference
 

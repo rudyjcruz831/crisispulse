@@ -67,3 +67,33 @@ def test_hourly_features_are_duplicate_adjusted_and_include_velocity(tmp_path: P
     assert report["feature_rows"] == 2
     assert report["regions"] == 1
     assert len(report["top_signals"]) == 1
+
+
+def test_ambiguous_location_is_routed_to_unknown_region(tmp_path: Path) -> None:
+    clean_path = tmp_path / "clean.parquet"
+    feature_path = tmp_path / "features.parquet"
+    pl.DataFrame(
+        {
+            "seen_at": [datetime(2026, 8, 20, 12, 0), datetime(2026, 8, 20, 12, 15)],
+            "country_code": ["US", "US"],
+            "adm1_code": ["USNH", "USHI"],
+            "disaster_type": ["flood", "flood"],
+            "source_domain": ["ambiguous.test", "hawaii.test"],
+            "duplicate_group_id": ["story-1", "story-2"],
+            "disaster_match_strength": ["high", "high"],
+            "tone": [-2.0, -3.0],
+            "location_selection_status": ["ambiguous_region", "single_region"],
+        }
+    ).write_parquet(clean_path)
+
+    build_features(clean_path, feature_path)
+    features = pl.read_parquet(feature_path)
+    unknown = features.filter(pl.col("region_id") == "UNKNOWN").row(0, named=True)
+    hawaii = features.filter(pl.col("region_id") == "US:USHI").row(0, named=True)
+
+    assert unknown["country_code"] is None
+    assert unknown["adm1_code"] is None
+    assert unknown["location_review_article_count"] == 1
+    assert unknown["location_confident_article_count"] == 0
+    assert hawaii["location_review_article_count"] == 0
+    assert hawaii["location_confident_article_count"] == 1

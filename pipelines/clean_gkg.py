@@ -21,9 +21,9 @@ from pipelines.canonicalize_urls import canonicalize_url, source_domain
 from pipelines.deduplicate import story_group
 from pipelines.gdelt_schema import GKG_COLUMNS
 from pipelines.parse_locations import (
-    choose_primary_location,
     distinct_location_count,
     parse_enhanced_locations,
+    select_primary_location,
 )
 
 
@@ -47,6 +47,8 @@ OUTPUT_SCHEMA = {
     "latitude": pl.Float64,
     "longitude": pl.Float64,
     "distinct_location_count": pl.Int64,
+    "location_selection_status": pl.String,
+    "location_candidate_regions": pl.List(pl.String),
     "disaster_type": pl.String,
     "disaster_match_strength": pl.String,
     "matched_disaster_themes": pl.List(pl.String),
@@ -68,6 +70,8 @@ class PipelineStats:
     weak_rows_skipped: int = 0
     disaster_rows: int = 0
     duplicate_rows: int = 0
+    location_review_rows: int = 0
+    ambiguous_region_rows: int = 0
     output_rows: int = 0
 
 
@@ -221,7 +225,8 @@ def clean_files(
             seen_articles.add(article_id)
 
             locations = parse_enhanced_locations(row.get("V2ENHANCEDLOCATIONS"))
-            primary = choose_primary_location(locations)
+            location_selection = select_primary_location(locations)
+            primary = location_selection.location
             location_count = distinct_location_count(locations)
             timestamp = parse_timestamp(row.get("V2.1DATE"))
             duplicate_group_id, duplicate_group_method = story_group(
@@ -238,6 +243,17 @@ def clean_files(
                 quality_flags.append("invalid_coordinates")
             if location_count > 1:
                 quality_flags.append("multiple_locations")
+            if location_selection.status == "ambiguous_region":
+                quality_flags.append("ambiguous_region")
+                stats.ambiguous_region_rows += 1
+            if location_selection.status == "unresolved_region":
+                quality_flags.append("unresolved_region")
+            if location_selection.status in {
+                "missing",
+                "ambiguous_region",
+                "unresolved_region",
+            }:
+                stats.location_review_rows += 1
 
             records.append(
                 {
@@ -256,6 +272,10 @@ def clean_files(
                     "latitude": primary.latitude if primary else None,
                     "longitude": primary.longitude if primary else None,
                     "distinct_location_count": location_count,
+                    "location_selection_status": location_selection.status,
+                    "location_candidate_regions": list(
+                        location_selection.candidate_regions
+                    ),
                     "disaster_type": disaster_type,
                     "disaster_match_strength": match_strength,
                     "matched_disaster_themes": matched_themes,

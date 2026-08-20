@@ -18,6 +18,8 @@ DISPLAY_COLUMNS = [
     "weak_article_count",
     "unique_domain_count",
     "estimated_unique_story_count",
+    "location_confident_article_count",
+    "location_review_article_count",
     "duplicate_ratio",
     "article_velocity",
 ]

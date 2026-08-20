@@ -17,6 +17,14 @@ def _flag_count(frame: pl.DataFrame, flag: str) -> int:
 
 def build_report(parquet_path: Path, top: int = 10) -> dict[str, object]:
     frame = pl.read_parquet(parquet_path)
+    location_status_counts = (
+        frame.group_by("location_selection_status")
+        .len(name="article_count")
+        .sort("location_selection_status")
+        .to_dicts()
+        if "location_selection_status" in frame.columns
+        else []
+    )
     top_locations = (
         frame.with_columns(
             pl.col("location_name").fill_null("Unknown"),
@@ -66,6 +74,14 @@ def build_report(parquet_path: Path, top: int = 10) -> dict[str, object]:
         "missing_location_count": int(frame["location_name"].null_count()),
         "invalid_coordinate_count": _flag_count(frame, "invalid_coordinates"),
         "multiple_location_count": _flag_count(frame, "multiple_locations"),
+        "ambiguous_region_count": _flag_count(frame, "ambiguous_region"),
+        "location_review_count": sum(
+            item["article_count"]
+            for item in location_status_counts
+            if item["location_selection_status"]
+            in {"missing", "ambiguous_region", "unresolved_region"}
+        ),
+        "location_selection_statuses": location_status_counts,
         "top_locations": top_locations,
         "matching_themes": matching_themes,
         "top_story_groups": top_story_groups,

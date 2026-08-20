@@ -22,6 +22,12 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     --input data/clean/flood_articles_batch.parquet
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+& $Python -m pipelines.build_review_set `
+    --input data/clean/flood_articles_batch.parquet `
+    --output data/review/flood_manual_review.csv `
+    --size 40
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
 & $Python -m pipelines.build_features `
     --input data/clean/flood_articles_batch.parquet `
     --output data/features/hourly_region_features.parquet

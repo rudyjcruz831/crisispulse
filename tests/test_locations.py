@@ -2,6 +2,7 @@ from pipelines.parse_locations import (
     choose_primary_location,
     distinct_location_count,
     parse_enhanced_locations,
+    select_primary_location,
 )
 
 
@@ -37,3 +38,30 @@ def test_repeated_mentions_are_one_distinct_location_and_influence_primary() -> 
     assert distinct_location_count(locations) == 2
     assert primary is not None
     assert primary.name == "Denver, Colorado, United States"
+
+
+def test_tied_regions_are_marked_ambiguous_even_when_one_location_is_selected() -> None:
+    raw = (
+        "3#Big Island, New Hampshire, United States#US#USNH#NH007#43.7#-71.6#1#5;"
+        "3#Hawaii, United States#US#USHI##19.9#-155.6#2#20"
+    )
+    selection = select_primary_location(parse_enhanced_locations(raw))
+
+    assert selection.location is not None
+    assert selection.location.adm1_code == "USNH"
+    assert selection.status == "ambiguous_region"
+    assert selection.candidate_regions == ("US:USHI", "US:USNH")
+
+
+def test_repeated_region_mentions_create_a_dominant_assignment() -> None:
+    raw = (
+        "3#Big Island, New Hampshire, United States#US#USNH#NH007#43.7#-71.6#1#5;"
+        "3#Hawaii, United States#US#USHI##19.9#-155.6#2#20;"
+        "3#Hawaii, United States#US#USHI##19.9#-155.6#2#80"
+    )
+    selection = select_primary_location(parse_enhanced_locations(raw))
+
+    assert selection.location is not None
+    assert selection.location.adm1_code == "USHI"
+    assert selection.status == "dominant_region"
+    assert selection.candidate_regions == ("US:USHI", "US:USNH")
