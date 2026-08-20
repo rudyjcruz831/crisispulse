@@ -37,6 +37,9 @@ Included sample TSV                         Optional live GDELT index
                                                             dashboard JSON export
                                                                       |
                                                                       v
+                                                               local Go API
+                                                                      |
+                                                                      v
                                                             local React dashboard
 ```
 
@@ -82,7 +85,11 @@ Statuses make readiness explicit: `insufficient_history`, `below_minimum_support
 
 ### Evidence dashboard
 
-The exporter combines clean-data counts, compact feature history, anomaly parameters, status totals, and the latest supported rows into one small versioned JSON snapshot. The React dashboard server-renders that snapshot as a candidate summary, evidence table, readiness breakdown, and explanation of every alert gate. A history run refreshes the snapshot automatically. The first dashboard is read-only, local, and has no database, authentication, map service, or paid API.
+The exporter combines clean-data counts, compact feature history, anomaly parameters, status totals, and the latest supported rows into one small versioned JSON snapshot. A history run refreshes the snapshot automatically.
+
+The standard-library Go API reads that file on every request, so a completed history run becomes visible without restarting the service. It exposes a health check, the complete snapshot, and a smaller signals projection. Responses are read-only, size-limited, no-store, and restricted to the configured local dashboard origin. The React dashboard uses the API when it is reachable and falls back to its bundled verified snapshot when it is not.
+
+The first dashboard remains local and has no database, authentication, map service, or paid API.
 
 ## Key decisions and limits
 

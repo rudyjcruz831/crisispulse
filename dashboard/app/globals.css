@@ -67,6 +67,7 @@ main { min-height: 100vh; }
 
 .header-meta strong { color: var(--ink); font-weight: 700; }
 .live-dot { background: var(--teal); border-radius: 50%; box-shadow: 0 0 0 4px var(--teal-soft); height: 7px; width: 7px; }
+.live-dot.snapshot { background: var(--amber); box-shadow: 0 0 0 4px #f2e9c9; }
 
 .hero {
   background: var(--navy);

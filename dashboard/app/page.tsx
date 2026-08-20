@@ -1,7 +1,11 @@
-import dashboardData from "../data/dashboard.json";
+"use client";
 
-const { snapshot, signals, parameters, status_counts: statusCounts } = dashboardData;
-const hasCandidates = snapshot.candidates > 0;
+import { useEffect, useState } from "react";
+import bundledDashboardData from "../data/dashboard.json";
+
+type DashboardData = typeof bundledDashboardData;
+
+const snapshotURL = "http://127.0.0.1:8080/api/v1/snapshot";
 
 const formatNumber = (value: number) => value.toLocaleString("en-US");
 const formatScore = (value: number | null) => {
@@ -16,10 +20,36 @@ const statusRows = [
   { key: "candidate_anomaly", label: "Candidate anomaly", tone: "alert" },
 ] as const;
 
-const barWidth = (count: number) =>
-  count === 0 ? "0%" : `${Math.max(3, (count / snapshot.scored_rows) * 100)}%`;
-
 export default function Home() {
+  const [dashboardData, setDashboardData] = useState<DashboardData>(bundledDashboardData);
+  const [dataSource, setDataSource] = useState<"api" | "snapshot">("snapshot");
+  const { snapshot, signals, parameters, status_counts: statusCounts } = dashboardData;
+  const hasCandidates = snapshot.candidates > 0;
+  const barWidth = (count: number) =>
+    count === 0 ? "0%" : `${Math.max(3, (count / snapshot.scored_rows) * 100)}%`;
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch(snapshotURL, { cache: "no-store", signal: controller.signal })
+      .then((response) => {
+        if (!response.ok) throw new Error(`API returned ${response.status}`);
+        return response.json() as Promise<DashboardData>;
+      })
+      .then((nextData) => {
+        if (!nextData.snapshot || !Array.isArray(nextData.signals)) {
+          throw new Error("API response is missing dashboard fields");
+        }
+        setDashboardData(nextData);
+        setDataSource("api");
+      })
+      .catch((error: unknown) => {
+        if (!(error instanceof DOMException && error.name === "AbortError")) {
+          setDataSource("snapshot");
+        }
+      });
+    return () => controller.abort();
+  }, []);
+
   return (
     <main>
       <header className="site-header">
@@ -28,8 +58,8 @@ export default function Home() {
           <span>CrisisPulse</span>
         </a>
         <div className="header-meta">
-          <span className="live-dot" aria-hidden="true" />
-          Latest completed run
+          <span className={dataSource === "api" ? "live-dot" : "live-dot snapshot"} aria-hidden="true" />
+          {dataSource === "api" ? "Live API connected" : "Verified local snapshot"}
           <strong>{snapshot.updated_label}</strong>
         </div>
       </header>

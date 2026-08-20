@@ -23,7 +23,8 @@ The current version costs **$0** to run: it uses local Python, DuckDB, Parquet, 
 - A local scorecard for completed relevance and primary-region labels.
 - Conservative rolling median/MAD anomaly candidates with a seven-day history gate.
 - A local React evidence dashboard generated from the latest pipeline outputs.
-- Twenty-nine Python tests, four Go tests, and two dashboard rendering tests.
+- A local Go API for health, complete snapshot, and supported-signal responses.
+- Twenty-nine Python tests, nine Go tests, and two dashboard rendering tests.
 
 ## Quick start on Windows
 
@@ -139,7 +140,14 @@ The batch command also creates a conservative anomaly-scoring table. It fills mi
 
 The seven-day validation produced the first fully eligible hour: two rows were classified as normal and zero alert candidates were created. This confirms the history gate opens without manufacturing alerts; it does not mean no floods occurred.
 
-## Local dashboard
+## Local API and dashboard
+
+Install the verified portable Go toolchain once, then start the API:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\setup-go.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\run-api.ps1
+```
 
 The history runner refreshes `dashboard/data/dashboard.json` from the real clean, feature, and anomaly outputs. Start the read-only dashboard locally with:
 
@@ -149,12 +157,19 @@ npm install
 npm run dev
 ```
 
-The dashboard shows current candidate counts, supported regional evidence, scoring readiness, and the alert guardrails. It requires no paid API and never presents an unusual news pattern as a verified disaster.
+The dashboard shows current candidate counts, supported regional evidence, scoring readiness, and the alert guardrails. It connects to the Go API when available and visibly falls back to the last verified snapshot when the API is stopped. It requires no paid API and never presents an unusual news pattern as a verified disaster.
+
+Run the complete Python, Go, and dashboard test suite with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\test.ps1
+```
 
 ## Repository map
 
 ```text
 cmd/ingestor/              Go live-file downloader
+cmd/api/                   Go signals API
 pipelines/                 Python cleaning, batch aggregation, features, and reports
 data/sample/               Tiny, versioned GKG-format fixture
 data/raw/                  Immutable downloads (ignored by Git)
@@ -188,4 +203,4 @@ These constraints are deliberate. The next milestone is to label the generated r
 
 ## Design reference
 
-See [the architecture](docs/architecture.md) for component details, [the data dictionary](docs/data-dictionary.md) for the Parquet schemas, [the first live validation](docs/live-validation-2026-08-20.md), [the multi-file validation](docs/multi-file-validation-2026-08-20.md), and [the seven-day validation](docs/seven-day-validation-2026-08-20.md).
+See [the architecture](docs/architecture.md) for component details, [the API reference](docs/api.md), [the data dictionary](docs/data-dictionary.md) for the Parquet schemas, [the first live validation](docs/live-validation-2026-08-20.md), [the multi-file validation](docs/multi-file-validation-2026-08-20.md), and [the seven-day validation](docs/seven-day-validation-2026-08-20.md).
