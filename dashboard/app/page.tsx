@@ -4,13 +4,48 @@ import { useEffect, useState } from "react";
 import bundledDashboardData from "../data/dashboard.json";
 
 type DashboardData = typeof bundledDashboardData;
+type Signal = DashboardData["signals"][number];
+type ReviewDecision = "confirmed_event" | "irrelevant_news" | "uncertain";
+type ReviewRecord = {
+  signal_id: string;
+  region_code: string;
+  window_start: string;
+  decision: ReviewDecision;
+  reviewed_at: string;
+};
+type ReviewsResponse = { reviews: ReviewRecord[] };
+type ReviewResponse = { review: ReviewRecord };
 
-const snapshotURL = "http://127.0.0.1:8080/api/v1/snapshot";
+const snapshotURL = "/api/v1/snapshot";
+const reviewsURL = "/api/v1/reviews";
+
+const reviewOptions: Array<{
+  value: ReviewDecision;
+  label: string;
+  shortLabel: string;
+  tone: string;
+}> = [
+  { value: "confirmed_event", label: "Real event", shortLabel: "Real event", tone: "confirmed" },
+  { value: "irrelevant_news", label: "Irrelevant news", shortLabel: "Irrelevant", tone: "irrelevant" },
+  { value: "uncertain", label: "Uncertain", shortLabel: "Uncertain", tone: "uncertain" },
+];
 
 const formatNumber = (value: number) => value.toLocaleString("en-US");
 const formatScore = (value: number | null) => {
   if (value === null) return "—";
   return `${value > 0 ? "+" : ""}${value.toFixed(2)}`.replace("-", "−");
+};
+const signalID = (signal: Signal) => `${signal.code}|${signal.window_start}`;
+const formatWindow = (value: string) => {
+  const date = new Date(value.endsWith("Z") ? value : `${value}Z`);
+  if (Number.isNaN(date.getTime())) return value;
+  return `${date.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "UTC",
+  })} UTC`;
 };
 
 const statusRows = [
@@ -23,8 +58,14 @@ const statusRows = [
 export default function Home() {
   const [dashboardData, setDashboardData] = useState<DashboardData>(bundledDashboardData);
   const [dataSource, setDataSource] = useState<"api" | "snapshot">("snapshot");
+  const [reviews, setReviews] = useState<Record<string, ReviewRecord>>({});
+  const [reviewConnection, setReviewConnection] = useState<"loading" | "ready" | "unavailable">("loading");
+  const [savingReview, setSavingReview] = useState<{ signalID: string; decision: ReviewDecision } | null>(null);
+  const [reviewNotice, setReviewNotice] = useState<string | null>(null);
   const { snapshot, signals, parameters, status_counts: statusCounts } = dashboardData;
   const hasCandidates = snapshot.candidates > 0;
+  const candidateSignals = signals.filter((signal) => signal.status === "candidate_anomaly");
+  const reviewedCount = candidateSignals.filter((signal) => reviews[signalID(signal)]).length;
   const barWidth = (count: number) =>
     count === 0 ? "0%" : `${Math.max(3, (count / snapshot.scored_rows) * 100)}%`;
 
@@ -49,6 +90,56 @@ export default function Home() {
       });
     return () => controller.abort();
   }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch(reviewsURL, { cache: "no-store", signal: controller.signal })
+      .then((response) => {
+        if (!response.ok) throw new Error(`Review API returned ${response.status}`);
+        return response.json() as Promise<ReviewsResponse>;
+      })
+      .then((payload) => {
+        const latest = Object.fromEntries(
+          payload.reviews.map((review) => [review.signal_id, review]),
+        );
+        setReviews(latest);
+        setReviewConnection("ready");
+      })
+      .catch((error: unknown) => {
+        if (!(error instanceof DOMException && error.name === "AbortError")) {
+          setReviewConnection("unavailable");
+        }
+      });
+    return () => controller.abort();
+  }, []);
+
+  const saveReview = async (signal: Signal, decision: ReviewDecision) => {
+    const id = signalID(signal);
+    setSavingReview({ signalID: id, decision });
+    setReviewNotice(null);
+    try {
+      const response = await fetch(reviewsURL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          region_code: signal.code,
+          window_start: signal.window_start,
+          decision,
+        }),
+      });
+      if (!response.ok) throw new Error(`Review API returned ${response.status}`);
+      const payload = await response.json() as ReviewResponse;
+      setReviews((current) => ({ ...current, [payload.review.signal_id]: payload.review }));
+      setReviewConnection("ready");
+      const choice = reviewOptions.find((option) => option.value === decision);
+      setReviewNotice(`Saved “${choice?.label ?? decision}” for ${signal.region}.`);
+    } catch {
+      setReviewConnection("unavailable");
+      setReviewNotice("The decision could not be saved. Check that the local API is running.");
+    } finally {
+      setSavingReview(null);
+    }
+  };
 
   return (
     <main>
@@ -127,6 +218,91 @@ export default function Home() {
         </article>
       </section>
 
+      <section className="review-section" aria-labelledby="review-heading">
+        <div className="review-heading">
+          <div>
+            <p className="eyebrow">Human validation</p>
+            <h2 id="review-heading">Review queue</h2>
+            <p>
+              Label unusual reporting so CrisisPulse can separate credible events
+              from irrelevant coverage and ambiguous evidence.
+            </p>
+          </div>
+          <span className={reviewedCount === candidateSignals.length && candidateSignals.length > 0 ? "review-progress complete" : "review-progress"}>
+            {reviewedCount} of {candidateSignals.length} labeled
+          </span>
+        </div>
+
+        {reviewNotice ? <p className="review-notice" role="status">{reviewNotice}</p> : null}
+
+        {candidateSignals.length > 0 ? (
+          <div className="review-grid">
+            {candidateSignals.map((signal) => {
+              const id = signalID(signal);
+              const currentReview = reviews[id];
+              const currentOption = reviewOptions.find(
+                (option) => option.value === currentReview?.decision,
+              );
+              const isSaving = savingReview?.signalID === id;
+              return (
+                <article className="review-card" key={id}>
+                  <header>
+                    <div>
+                      <span className="review-code">{signal.code}</span>
+                      <h3>{signal.region}</h3>
+                      <time dateTime={signal.window_start}>{formatWindow(signal.window_start)}</time>
+                    </div>
+                    <span className={currentOption ? `decision-chip ${currentOption.tone}` : "decision-chip pending"}>
+                      {currentOption?.shortLabel ?? "Needs review"}
+                    </span>
+                  </header>
+                  <dl className="review-evidence">
+                    <div><dt>Story groups</dt><dd>{signal.stories}</dd></div>
+                    <div><dt>Source domains</dt><dd>{signal.domains}</dd></div>
+                    <div><dt>Prior baseline</dt><dd>{signal.baseline?.toFixed(1) ?? "—"}</dd></div>
+                    <div><dt>Robust score</dt><dd>{formatScore(signal.score)}</dd></div>
+                  </dl>
+                  <p className="review-guardrail">
+                    Choose “Real event” only when the news evidence appears to describe
+                    a physical flood. This label does not issue a public warning.
+                  </p>
+                  <div className="review-actions" aria-label={`Review ${signal.region}`}>
+                    {reviewOptions.map((option) => (
+                      <button
+                        className={`review-button ${option.tone}${currentReview?.decision === option.value ? " selected" : ""}`}
+                        disabled={reviewConnection !== "ready" || isSaving || dataSource !== "api"}
+                        key={option.value}
+                        onClick={() => void saveReview(signal, option.value)}
+                        type="button"
+                        aria-pressed={currentReview?.decision === option.value}
+                      >
+                        {isSaving && savingReview?.decision === option.value ? "Saving…" : option.label}
+                      </button>
+                    ))}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="review-empty">
+            <span aria-hidden="true">✓</span>
+            <div>
+              <strong>No candidate signals are waiting for review.</strong>
+              <p>The queue will populate automatically when a reporting pattern passes every evidence gate.</p>
+            </div>
+          </div>
+        )}
+
+        <p className="review-storage">
+          {reviewConnection === "ready"
+            ? "Decisions are saved only on this PC in the local CrisisPulse review log."
+            : reviewConnection === "loading"
+              ? "Connecting to the local review log…"
+              : "Start or restart the local API to save review decisions."}
+        </p>
+      </section>
+
       <section className="content-grid">
         <article className="surface evidence-surface">
           <div className="section-heading">
@@ -150,12 +326,12 @@ export default function Home() {
                   <th scope="col">Domains</th>
                   <th scope="col">Baseline</th>
                   <th scope="col">Score</th>
-                  <th scope="col">Decision</th>
+                  <th scope="col">Signal status</th>
                 </tr>
               </thead>
               <tbody>
                 {signals.map((signal) => (
-                  <tr key={signal.code}>
+                  <tr key={signalID(signal)}>
                     <td><strong>{signal.region}</strong><small>{signal.code}</small></td>
                     <td>{signal.stories}</td>
                     <td>{signal.domains}</td>
@@ -197,9 +373,9 @@ export default function Home() {
             })}
           </div>
           <div className="next-window">
-            <span>Next milestone</span>
-            <strong>Accumulate more eligible hours</strong>
-            <p>More history lets us measure whether alert candidates remain stable over time.</p>
+            <span>Human review active</span>
+            <strong>Turn candidates into labeled evidence</strong>
+            <p>Saved decisions create the foundation for measuring false positives and improving alert quality.</p>
           </div>
         </aside>
       </section>

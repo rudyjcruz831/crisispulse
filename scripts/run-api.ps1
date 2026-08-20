@@ -1,6 +1,7 @@
 param(
     [string]$Address = "127.0.0.1:8080",
     [string]$DataPath = "",
+    [string]$ReviewPath = "",
     [string]$AllowedOrigin = "http://localhost:3000"
 )
 
@@ -28,6 +29,9 @@ try {
     )
     if ($DataPath) {
         $ApiArguments += @("--data", $DataPath)
+    }
+    if ($ReviewPath) {
+        $ApiArguments += @("--reviews", $ReviewPath)
     }
     & $GoExecutable @ApiArguments
     $ExitCode = $LASTEXITCODE

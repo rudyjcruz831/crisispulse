@@ -87,9 +87,11 @@ Statuses make readiness explicit: `insufficient_history`, `below_minimum_support
 
 The exporter combines coverage totals from compact feature history, anomaly parameters, status totals, and the latest supported rows into one small JSON snapshot. Using the same feature history for coverage and scoring prevents an incremental clean batch from being presented as the full retained reporting window. A history run refreshes the snapshot automatically.
 
-The standard-library Go API reads that file on every request, so a completed history run becomes visible without restarting the service. It exposes a health check, the complete snapshot, and a smaller signals projection. Responses are read-only, size-limited, no-store, and restricted to the configured local dashboard origin. The React dashboard uses the API when it is reachable and falls back to its bundled verified snapshot when it is not.
+The standard-library Go API reads that file on every request, so a completed history run becomes visible without restarting the service. It exposes a health check, the complete snapshot, a smaller signals projection, and a local review endpoint. Snapshot responses are read-only, size-limited, and no-store. Review writes accept only three validated decisions from the configured local dashboard origin.
 
-The first dashboard remains local and has no database, authentication, map service, or paid API.
+Review decisions use a bounded append-only JSON Lines audit log. Re-labeling a region/hour adds a new record; reads collapse the log to the latest decision per stable signal ID. This keeps the data inspectable and preserves corrections without adding a database. The React dashboard uses the API when it is reachable and falls back to its bundled verified snapshot when it is not. Review buttons remain disabled without the local API.
+
+The first dashboard remains local and has no authentication, map service, remote database, or paid API.
 
 ### Incremental refresh
 
