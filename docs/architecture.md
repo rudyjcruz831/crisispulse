@@ -28,8 +28,10 @@ Included sample TSV                         Optional live GDELT index
                   v                      v                v
           DuckDB hourly counts    manual-review CSV  ADM1/hour features
                                                            |
-                                                           v
-                                                 JSON inspection report
+                                              +------------+------------+
+                                              |                         |
+                                              v                         v
+                                    JSON inspection report    history-gated MAD scorer
 ```
 
 ## Components
@@ -62,6 +64,12 @@ The first gold layer uses `country_code:adm1_code` as the region key, falling ba
 
 The review builder writes a deterministic CSV sampled in round-robin order across high/weak theme strength and assigned/questionable location groups. It includes the article URL, matched themes, selected location, candidate regions, and blank human-label columns. The labels remain local and are not used as ground truth until a person fills them in. A separate evaluator then reports relevance rate by match strength and primary-region accuracy while excluding blank and uncertain labels.
 
+### Anomaly candidate scorer
+
+The scorer densifies each observed region/disaster series to hourly rows, filling absent reporting with zero. For every hour it computes a rolling median and median absolute deviation from prior hours only. The default gate requires 168 prior hours, at least three high-confidence story groups, at least three source domains, a story increase of at least three, and a robust-z score of at least `6.0`. When historical MAD is zero, the same history and support gates still apply before a positive jump can become a candidate.
+
+Statuses make readiness explicit: `insufficient_history`, `below_minimum_support`, `normal`, or `candidate_anomaly`. The output is an unusual-reporting candidate list, never a claim that a physical disaster occurred.
+
 ## Key decisions and limits
 
 - `seen_at` is the GDELT processing timestamp and is stored as a timezone-naive UTC value for cross-platform compatibility.
@@ -69,4 +77,5 @@ The review builder writes a deterministic CSV sampled in round-robin order acros
 - Exact canonical URL duplicates are removed. A conservative URL-slug heuristic groups obvious cross-domain copies but does not delete them; embeddings or MinHash remain a later improvement.
 - The primary-location heuristic prefers valid coordinates, geographic specificity, repeated mentions, and then the earliest mention. Repeated mentions of the same region can create a dominant assignment. Equal top region counts are explicitly ambiguous and cannot enter a named regional aggregate. Questionable coordinates remain visible through quality flags.
 - Raw downloads are immutable. Reprocessing should create a new cleaned output instead of altering the source file.
+- Anomaly baselines include zero-filled hours and exclude the current observation to avoid survivorship bias and future leakage.
 - Every component runs locally with free software. No credentials, cloud accounts, or paid APIs are used.

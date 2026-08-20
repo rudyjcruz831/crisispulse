@@ -68,3 +68,24 @@ The manual-review CSV copies the article identity, URL, disaster match, location
 | `review_notes` | Blank free-text notes for the reviewer. |
 
 The review evaluator accepts `relevant`, `not_relevant`, or `uncertain` for disaster relevance. Primary-region labels use `country:adm1`, `UNKNOWN`, or `uncertain`. Blank and uncertain values are reported separately and excluded from calculated rates.
+
+## Anomaly candidate Parquet
+
+| Column | Type | Meaning |
+|---|---|---|
+| `window_start` | datetime | UTC hour being scored. |
+| `region_id` | string | Region or `UNKNOWN`. |
+| `country_code` | string/null | GDELT country code for a confident region. |
+| `adm1_code` | string/null | GDELT ADM1 code for a confident region. |
+| `disaster_type` | string | Disaster category. |
+| `observed_feature_row` | boolean | Whether the source feature table contained this row; false rows are zero-filled hours. |
+| `article_count` | integer | Raw retained article count for the hour. |
+| `estimated_unique_story_count` | integer | Duplicate-adjusted story count. |
+| `high_confidence_story_count` | integer | High-strength story count used as the anomaly signal. |
+| `unique_domain_count` | integer | Source-domain support for the candidate gate. |
+| `baseline_history_hours` | integer | Prior zero-filled hourly observations available to the baseline. |
+| `baseline_median` | float/null | Median high-confidence story count over prior lookback hours. |
+| `baseline_mad` | float/null | Median absolute deviation over prior lookback hours. |
+| `robust_z_score` | float/null | Robust standardized increase; null when history is insufficient or MAD is zero. |
+| `anomaly_status` | string | `insufficient_history`, `below_minimum_support`, `normal`, or `candidate_anomaly`. |
+| `is_candidate_anomaly` | boolean | True only after every history, story, domain, increase, and score gate passes. |
