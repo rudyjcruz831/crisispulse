@@ -46,15 +46,23 @@ def build_dashboard_snapshot(
     anomaly_path: Path,
     anomaly_report_path: Path,
 ) -> dict[str, Any]:
-    clean = pl.read_parquet(clean_path)
+    # Keep accepting the clean path for compatibility with existing commands. Coverage
+    # totals come from feature history so an incremental refresh cannot mix a two-hour
+    # clean batch with the full accumulated reporting window.
+    if not clean_path.exists():
+        raise ValueError("clean output does not exist")
     features = pl.read_parquet(feature_path)
     anomalies = pl.read_parquet(anomaly_path)
     report = json.loads(anomaly_report_path.read_text(encoding="utf-8"))
 
     if features.is_empty() or anomalies.is_empty():
         raise ValueError("feature and anomaly outputs must not be empty")
-    if "duplicate_group_id" not in clean.columns:
-        raise ValueError("clean output must contain duplicate_group_id")
+    required_feature_columns = {"article_count", "estimated_unique_story_count"}
+    missing_feature_columns = required_feature_columns.difference(features.columns)
+    if missing_feature_columns:
+        raise ValueError(
+            f"feature output is missing columns: {sorted(missing_feature_columns)}"
+        )
 
     window_start = features["window_start"].min()
     window_end = features["window_start"].max()
@@ -108,10 +116,10 @@ def build_dashboard_snapshot(
             "window_end": window_end.isoformat(),
             "window_label": _window_label(window_start, window_end),
             "updated_label": _time_label(window_end),
-            "clean_articles": clean.height,
+            "clean_articles": int(features["article_count"].sum()),
             "regions": int(report["regions"]),
             "hours": int(report["hourly_windows"]),
-            "story_groups": int(clean["duplicate_group_id"].n_unique()),
+            "story_groups": int(features["estimated_unique_story_count"].sum()),
             "candidates": int(report["candidate_anomalies"]),
             "scored_rows": int(report["scored_rows"]),
         },

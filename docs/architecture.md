@@ -49,7 +49,7 @@ Included sample TSV                         Optional live GDELT index
 
 The ingestor reads GDELT's `lastupdate.txt`, selects the newest GKG ZIP, and can derive up to 672 consecutive 15-minute URLs ending at that file (seven days). Downloads use a temporary file followed by an atomic rename. Every new file receives a SHA-256 checksum and an entry in `manifest.jsonl`. Existing destinations report `already_present` and are not downloaded again.
 
-When Docker or Go is unavailable, the Python standard-library downloader applies the same seven-day limit, checksum manifest, atomic rename, and idempotency rules. Its Windows runner defaults to `%LOCALAPPDATA%\CrisisPulse\raw` so multi-gigabyte raw history is not synchronized through OneDrive.
+When Docker or Go is unavailable, the Python standard-library downloader applies the same seven-day limit, checksum manifest, atomic rename, and idempotency rules. Its Windows runner defaults to `%USERPROFILE%\.crisispulse\raw` so multi-gigabyte raw history is not synchronized through OneDrive and every local runtime sees the same physical folder, including Microsoft Store Python.
 
 After each history run, the compact feature merger atomically updates a local Parquet history keyed by hour, region, and disaster type. Overlapping batches replace the same keys instead of double-counting. The anomaly scorer reads this accumulated history, allowing raw ZIP retention to follow the user's storage policy independently of baseline continuity.
 
@@ -85,11 +85,17 @@ Statuses make readiness explicit: `insufficient_history`, `below_minimum_support
 
 ### Evidence dashboard
 
-The exporter combines clean-data counts, compact feature history, anomaly parameters, status totals, and the latest supported rows into one small versioned JSON snapshot. A history run refreshes the snapshot automatically.
+The exporter combines coverage totals from compact feature history, anomaly parameters, status totals, and the latest supported rows into one small JSON snapshot. Using the same feature history for coverage and scoring prevents an incremental clean batch from being presented as the full retained reporting window. A history run refreshes the snapshot automatically.
 
 The standard-library Go API reads that file on every request, so a completed history run becomes visible without restarting the service. It exposes a health check, the complete snapshot, and a smaller signals projection. Responses are read-only, size-limited, no-store, and restricted to the configured local dashboard origin. The React dashboard uses the API when it is reachable and falls back to its bundled verified snapshot when it is not.
 
 The first dashboard remains local and has no database, authentication, map service, or paid API.
+
+### Incremental refresh
+
+The refresh runner downloads the latest eight 15-minute files into a persistent cache outside OneDrive. It starts processing at the first hour boundary within that overlap, then merges the resulting region/hour features into compact history. A refreshed hour replaces its prior region rows as one partition rather than double-counting or leaving stale rows. The overlap allows an initially partial current hour to be replaced as later quarter-hour files arrive without treating the cut-off leading hour as complete.
+
+An exclusive local lock skips overlapping runs. After a successful refresh, raw retention removes only ZIP files beyond the newest 672, keeping disk usage bounded to approximately seven days. A local JSON status file records start, completion, last success, download counts, retained files, pruned files, and failure messages. The optional Windows Scheduled Task invokes this runner every 15 minutes and can be removed independently of project data.
 
 ## Key decisions and limits
 

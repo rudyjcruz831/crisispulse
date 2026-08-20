@@ -13,6 +13,13 @@ import polars as pl
 
 
 KEY_COLUMNS = ["window_start", "region_id", "disaster_type"]
+PARTITION_COLUMNS = ["window_start", "disaster_type"]
+VELOCITY_COLUMNS = {
+    "estimated_unique_story_count",
+    "unique_domain_count",
+    "article_velocity",
+    "domain_velocity",
+}
 
 
 @dataclass
@@ -39,9 +46,48 @@ def merge_feature_history(input_path: Path, history_path: Path) -> MergeStats:
     else:
         existing = pl.DataFrame(schema=current.schema)
 
-    combined = pl.concat([existing, current], how="vertical_relaxed")
+    observed_partitions = current.select(PARTITION_COLUMNS).unique()
+    retained = existing.join(
+        observed_partitions,
+        on=PARTITION_COLUMNS,
+        how="anti",
+    )
+    replaced_rows = existing.height - retained.height
+    combined = pl.concat([retained, current], how="vertical_relaxed")
     history = combined.unique(subset=KEY_COLUMNS, keep="last").sort(KEY_COLUMNS)
-    replaced_rows = existing.height + current.height - history.height
+    if VELOCITY_COLUMNS.issubset(history.columns):
+        base = history.drop(
+            "previous_story_count",
+            "previous_domain_count",
+            "article_velocity",
+            "domain_velocity",
+            strict=False,
+        )
+        previous = base.select(
+            "region_id",
+            "disaster_type",
+            (pl.col("window_start") + pl.duration(hours=1)).alias("window_start"),
+            pl.col("estimated_unique_story_count").alias("previous_story_count"),
+            pl.col("unique_domain_count").alias("previous_domain_count"),
+        )
+        history = (
+            base.join(
+                previous,
+                on=["region_id", "disaster_type", "window_start"],
+                how="left",
+            )
+            .with_columns(
+                (
+                    pl.col("estimated_unique_story_count")
+                    - pl.col("previous_story_count")
+                ).alias("article_velocity"),
+                (
+                    pl.col("unique_domain_count") - pl.col("previous_domain_count")
+                ).alias("domain_velocity"),
+            )
+            .select(current.columns)
+            .sort(KEY_COLUMNS)
+        )
 
     history_path.parent.mkdir(parents=True, exist_ok=True)
     temporary_path: Path | None = None

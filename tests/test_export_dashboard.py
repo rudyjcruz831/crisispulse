@@ -18,6 +18,7 @@ def test_dashboard_snapshot_prefers_candidates_and_summarizes_outputs(tmp_path):
     pl.DataFrame(
         {
             "window_start": [datetime(2026, 8, 20, 18), datetime(2026, 8, 20, 19)],
+            "article_count": [4, 5],
             "estimated_unique_story_count": [2, 3],
         }
     ).write_parquet(feature_path)
@@ -54,8 +55,8 @@ def test_dashboard_snapshot_prefers_candidates_and_summarizes_outputs(tmp_path):
         clean_path, feature_path, anomaly_path, report_path
     )
 
-    assert snapshot["snapshot"]["clean_articles"] == 3
-    assert snapshot["snapshot"]["story_groups"] == 2
+    assert snapshot["snapshot"]["clean_articles"] == 9
+    assert snapshot["snapshot"]["story_groups"] == 5
     assert snapshot["snapshot"]["candidates"] == 1
     assert snapshot["signals"][0]["code"] == "UNKNOWN"
     assert snapshot["signals"][0]["status_label"] == "Candidate"

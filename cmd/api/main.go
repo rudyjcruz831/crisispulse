@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 )
@@ -79,10 +80,18 @@ func main() {
 func parseFlags() config {
 	var cfg config
 	flag.StringVar(&cfg.address, "addr", "127.0.0.1:8080", "HTTP listen address")
-	flag.StringVar(&cfg.dataPath, "data", "dashboard/data/dashboard.json", "dashboard snapshot JSON")
+	flag.StringVar(&cfg.dataPath, "data", defaultDashboardPath(), "dashboard snapshot JSON")
 	flag.StringVar(&cfg.allowedOrigin, "allowed-origin", "http://localhost:3000", "allowed dashboard origin")
 	flag.Parse()
 	return cfg
+}
+
+func defaultDashboardPath() string {
+	homeRoot, err := os.UserHomeDir()
+	if err != nil {
+		return "dashboard/data/dashboard.json"
+	}
+	return filepath.Join(homeRoot, ".crisispulse", "dashboard.json")
 }
 
 func newHandler(dataPath, allowedOrigin string, logger *log.Logger) http.Handler {

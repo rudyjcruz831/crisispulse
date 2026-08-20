@@ -2,7 +2,7 @@
 
 This local React dashboard turns the latest CrisisPulse Parquet and JSON outputs into a readable evidence screen. It shows candidate counts, scoring readiness, supported regional signals, data coverage, and the guardrails behind every decision.
 
-When the local Go API is running on port 8080, the header reports `Live API connected` and the screen uses the API response. If the service is stopped or unavailable, it reports `Verified local snapshot` and continues to show the last versioned result instead of failing blank.
+When the local Go API is running on port 8080, the header reports `Live API connected` and the screen uses `%USERPROFILE%\.crisispulse\dashboard.json`, refreshed by the automatic pipeline. If the service is stopped or unavailable, it reports `Verified local snapshot` and continues to show the last versioned result instead of failing blank.
 
 The committed `data/dashboard.json` snapshot comes from the real seven-day validation. Refresh it after a history run with:
 
