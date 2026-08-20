@@ -144,6 +144,32 @@ h1 { font-family: Georgia, "Times New Roman", serif; font-size: clamp(3rem, 6.2v
 .review-evidence div:last-child { border-right: 0; padding-right: 0; }
 .review-evidence dt { color: var(--muted); font-size: 0.63rem; line-height: 1.3; text-transform: uppercase; }
 .review-evidence dd { font-family: Georgia, serif; font-size: 1.35rem; margin: 6px 0 0; }
+.source-evidence { background: #f3f3ed; border: 1px solid var(--line); margin-bottom: 18px; padding: 18px; }
+.source-evidence-heading { align-items: start; display: flex; gap: 18px; justify-content: space-between; }
+.source-evidence-heading span { color: var(--orange); display: block; font-size: 0.6rem; font-weight: 800; letter-spacing: 0.08em; margin-bottom: 5px; text-transform: uppercase; }
+.source-evidence-heading strong { font-family: Georgia, serif; font-size: 1.02rem; font-weight: 500; }
+.source-evidence-heading b { background: white; color: var(--teal); flex: 0 0 auto; font-size: 0.62rem; padding: 7px 9px; text-transform: uppercase; }
+.source-evidence-note { color: var(--muted); font-size: 0.67rem; line-height: 1.5; margin: 12px 0 16px; }
+.evidence-story-list { display: grid; gap: 10px; list-style: none; margin: 0; padding: 0; }
+.evidence-story { background: white; border: 1px solid var(--line); padding: 15px; }
+.evidence-story-header { align-items: center; display: flex; gap: 12px; justify-content: space-between; }
+.evidence-story-header span { color: var(--orange); font-family: ui-monospace, monospace; font-size: 0.61rem; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; }
+.evidence-story-header small { color: var(--muted); font-size: 0.61rem; }
+.evidence-primary-link { color: var(--ink); display: inline-block; font-family: Georgia, serif; font-size: 1.02rem; line-height: 1.25; margin-top: 10px; text-decoration-color: #aeb5ad; text-underline-offset: 3px; }
+.evidence-primary-link:hover, .evidence-primary-link:focus-visible { color: var(--orange); outline: none; }
+.evidence-primary-link span { color: var(--orange); font-family: Arial, sans-serif; font-size: 0.72rem; }
+.evidence-context { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.evidence-context span { background: #edf0ea; color: #536064; font-size: 0.59rem; padding: 5px 7px; }
+.evidence-story details { border-top: 1px solid var(--line); margin-top: 13px; padding-top: 11px; }
+.evidence-story summary { color: var(--teal); cursor: pointer; font-size: 0.65rem; font-weight: 800; }
+.source-list { display: grid; gap: 6px; list-style: none; margin: 10px 0 0; padding: 0; }
+.source-list a { align-items: center; background: #f5f6f2; color: var(--ink); display: flex; font-size: 0.64rem; gap: 10px; justify-content: space-between; padding: 8px 9px; text-decoration: none; }
+.source-list a:hover, .source-list a:focus-visible { background: var(--teal-soft); outline: none; }
+.source-list b { color: var(--teal); font-size: 0.58rem; text-transform: uppercase; }
+.single-source { color: var(--muted); font-size: 0.62rem; margin: 11px 0 0; }
+.source-evidence-empty { border-left: 3px solid var(--amber); display: grid; gap: 4px; padding: 7px 0 7px 12px; }
+.source-evidence-empty strong { font-size: 0.72rem; }
+.source-evidence-empty span { color: var(--muted); font-size: 0.65rem; line-height: 1.45; }
 .review-guardrail { color: var(--muted); font-size: 0.73rem; line-height: 1.55; margin-bottom: 18px; }
 .review-actions { display: grid; gap: 8px; grid-template-columns: repeat(3, 1fr); }
 .review-button { background: transparent; border: 1px solid var(--line); color: var(--ink); cursor: pointer; font: inherit; font-size: 0.7rem; font-weight: 800; min-height: 40px; padding: 9px 8px; }
@@ -239,6 +265,7 @@ footer strong { color: var(--ink); }
   .review-evidence { grid-template-columns: repeat(2, 1fr); row-gap: 18px; }
   .review-evidence div:nth-child(2) { border-right: 0; }
   .review-evidence div:nth-child(3) { padding-left: 0; }
+  .source-evidence { padding: 15px; }
   .review-actions { grid-template-columns: 1fr; }
   .method-strip { margin-left: 4vw; margin-right: 4vw; }
   .method-strip ol { grid-template-columns: 1fr; }

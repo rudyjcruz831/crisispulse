@@ -26,7 +26,8 @@ The current version costs **$0** to run: it uses local Python, DuckDB, Parquet, 
 - A local Go API for health, complete snapshot, and supported-signal responses.
 - A safe local 15-minute refresh workflow with locking, seven-day raw retention, and run status.
 - A local human-review queue with persistent real-event, irrelevant-news, and uncertain labels.
-- Twenty-nine Python tests, twelve Go tests, and two dashboard rendering tests.
+- Direct publisher evidence grouped into distinct stories for each review candidate.
+- Thirty Python tests, twelve Go tests, and two dashboard rendering tests.
 
 ## Quick start on Windows
 
@@ -159,7 +160,7 @@ npm install
 npm run dev
 ```
 
-The dashboard shows current candidate counts, supported regional evidence, scoring readiness, alert guardrails, and a human-review queue. Candidate decisions are appended to `%USERPROFILE%\.crisispulse\reviews.jsonl` and can be changed without losing the earlier audit entries. It connects to the Go API when available and visibly falls back to the last verified snapshot when the API is stopped. It requires no paid API and never presents an unusual news pattern as a verified disaster.
+The dashboard shows current candidate counts, supported regional evidence, scoring readiness, alert guardrails, and a human-review queue. Each candidate includes bounded, direct publisher links grouped by GDELT story identity; the interface clearly distinguishes URL-derived labels from verified headlines. Candidate decisions are appended to `%USERPROFILE%\.crisispulse\reviews.jsonl` and can be changed without losing the earlier audit entries. It connects to the Go API when available and visibly falls back to the last verified snapshot when the API is stopped. It requires no paid API and never presents an unusual news pattern as a verified disaster.
 
 Run the complete Python, Go, and dashboard test suite with:
 

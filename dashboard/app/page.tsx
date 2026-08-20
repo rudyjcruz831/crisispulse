@@ -3,8 +3,17 @@
 import { useEffect, useState } from "react";
 import bundledDashboardData from "../data/dashboard.json";
 
-type DashboardData = typeof bundledDashboardData;
-type Signal = DashboardData["signals"][number];
+type EvidenceSource = { domain: string; url: string };
+type EvidenceStory = {
+  story_id: string;
+  seen_at: string;
+  location: string | null;
+  themes: string[];
+  sources: EvidenceSource[];
+};
+type BundledSignal = (typeof bundledDashboardData)["signals"][number];
+type Signal = Omit<BundledSignal, "evidence"> & { evidence: EvidenceStory[] };
+type DashboardData = Omit<typeof bundledDashboardData, "signals"> & { signals: Signal[] };
 type ReviewDecision = "confirmed_event" | "irrelevant_news" | "uncertain";
 type ReviewRecord = {
   signal_id: string;
@@ -35,6 +44,28 @@ const formatScore = (value: number | null) => {
   if (value === null) return "—";
   return `${value > 0 ? "+" : ""}${value.toFixed(2)}`.replace("-", "−");
 };
+const sourceLabel = (source: EvidenceSource) => {
+  try {
+    const parsed = new URL(source.url);
+    const finalSegment = parsed.pathname.split("/").filter(Boolean).at(-1);
+    if (!finalSegment) return source.domain;
+    const readable = decodeURIComponent(finalSegment)
+      .replace(/[-_]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!readable) return source.domain;
+    return readable.replace(/\b\w/g, (letter) => letter.toUpperCase());
+  } catch {
+    return source.domain;
+  }
+};
+const themeLabel = (theme: string) => {
+  const readable = theme
+    .replace(/^NATURAL_DISASTER_/, "")
+    .replaceAll("_", " ")
+    .toLowerCase();
+  return readable.charAt(0).toUpperCase() + readable.slice(1);
+};
 const signalID = (signal: Signal) => `${signal.code}|${signal.window_start}`;
 const formatWindow = (value: string) => {
   const date = new Date(value.endsWith("Z") ? value : `${value}Z`);
@@ -56,7 +87,9 @@ const statusRows = [
 ] as const;
 
 export default function Home() {
-  const [dashboardData, setDashboardData] = useState<DashboardData>(bundledDashboardData);
+  const [dashboardData, setDashboardData] = useState<DashboardData>(
+    bundledDashboardData as DashboardData,
+  );
   const [dataSource, setDataSource] = useState<"api" | "snapshot">("snapshot");
   const [reviews, setReviews] = useState<Record<string, ReviewRecord>>({});
   const [reviewConnection, setReviewConnection] = useState<"loading" | "ready" | "unavailable">("loading");
@@ -244,6 +277,7 @@ export default function Home() {
                 (option) => option.value === currentReview?.decision,
               );
               const isSaving = savingReview?.signalID === id;
+              const evidence = signal.evidence ?? [];
               return (
                 <article className="review-card" key={id}>
                   <header>
@@ -262,6 +296,68 @@ export default function Home() {
                     <div><dt>Prior baseline</dt><dd>{signal.baseline?.toFixed(1) ?? "—"}</dd></div>
                     <div><dt>Robust score</dt><dd>{formatScore(signal.score)}</dd></div>
                   </dl>
+                  <section className="source-evidence" aria-label={`Source evidence for ${signal.region}`}>
+                    <div className="source-evidence-heading">
+                      <div>
+                        <span>Direct publisher evidence</span>
+                        <strong>Source links by distinct story</strong>
+                      </div>
+                      <b>{evidence.length} {evidence.length === 1 ? "group" : "groups"}</b>
+                    </div>
+                    <p className="source-evidence-note">
+                      GDELT supplies publisher URLs rather than verified headlines. Link labels below are derived from each URL path.
+                    </p>
+                    {evidence.length > 0 ? (
+                      <ol className="evidence-story-list">
+                        {evidence.map((story, storyIndex) => {
+                          const primarySource = story.sources[0];
+                          return (
+                            <li className="evidence-story" key={story.story_id}>
+                              <div className="evidence-story-header">
+                                <span>Story {String(storyIndex + 1).padStart(2, "0")}</span>
+                                <small>{story.sources.length} publisher {story.sources.length === 1 ? "link" : "links"}</small>
+                              </div>
+                              <a
+                                className="evidence-primary-link"
+                                href={primarySource.url}
+                                rel="noopener noreferrer"
+                                target="_blank"
+                              >
+                                {sourceLabel(primarySource)} <span aria-hidden="true">↗</span>
+                              </a>
+                              <div className="evidence-context">
+                                {story.location ? <span>{story.location}</span> : null}
+                                {story.themes.slice(0, 2).map((theme) => (
+                                  <span key={theme}>{themeLabel(theme)}</span>
+                                ))}
+                              </div>
+                              {story.sources.length > 1 ? (
+                                <details>
+                                  <summary>Compare publisher versions</summary>
+                                  <ul className="source-list">
+                                    {story.sources.map((source) => (
+                                      <li key={source.url}>
+                                        <a href={source.url} rel="noopener noreferrer" target="_blank">
+                                          <span>{source.domain}</span><b>Open ↗</b>
+                                        </a>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </details>
+                              ) : (
+                                <p className="single-source">Source: {primarySource.domain}</p>
+                              )}
+                            </li>
+                          );
+                        })}
+                      </ol>
+                    ) : (
+                      <div className="source-evidence-empty">
+                        <strong>No retained links for this window.</strong>
+                        <span>Keep the signal uncertain unless you can verify it independently.</span>
+                      </div>
+                    )}
+                  </section>
                   <p className="review-guardrail">
                     Choose “Real event” only when the news evidence appears to describe
                     a physical flood. This label does not issue a public warning.

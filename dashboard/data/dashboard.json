@@ -35,7 +35,8 @@
       "baseline": 4.0,
       "score": 0.22,
       "status": "normal",
-      "status_label": "Normal"
+      "status_label": "Normal",
+      "evidence": []
     },
     {
       "region": "Unknown region",
@@ -46,7 +47,8 @@
       "baseline": 15.5,
       "score": -1.83,
       "status": "normal",
-      "status_label": "Normal"
+      "status_label": "Normal",
+      "evidence": []
     }
   ]
 }

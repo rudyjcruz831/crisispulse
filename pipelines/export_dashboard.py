@@ -9,6 +9,7 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import polars as pl
 
@@ -25,6 +26,11 @@ REGION_LABELS = {
     "US:USHI": "Hawaii, United States",
 }
 
+CONFIDENT_LOCATION_STATUSES = {"single_region", "dominant_region", "legacy"}
+MAX_EVIDENCE_STORIES = 8
+MAX_EVIDENCE_SOURCES = 8
+MAX_EVIDENCE_THEMES = 8
+
 
 def _time_label(value: datetime) -> str:
     return f"{value:%b} {value.day}, {value:%H:%M} UTC"
@@ -40,11 +46,185 @@ def _rounded(value: float | None) -> float | None:
     return round(value, 2) if value is not None else None
 
 
+def _signal_id(region_id: str, window_start: str) -> str:
+    return f"{region_id}|{window_start}"
+
+
+def _safe_source(row: dict[str, Any]) -> dict[str, str] | None:
+    url = str(row.get("canonical_url") or "").strip()
+    if not url or len(url) > 2048:
+        return None
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return None
+    domain = parsed.hostname.strip().lower()
+    if not domain or len(domain) > 255:
+        return None
+    return {"domain": domain, "url": url}
+
+
+def _evidence_by_signal(
+    clean_path: Path, wanted_signal_ids: set[str]
+) -> dict[str, list[dict[str, Any]]]:
+    clean = pl.read_parquet(clean_path)
+    required_columns = {
+        "seen_at",
+        "country_code",
+        "adm1_code",
+        "location_selection_status",
+        "canonical_url",
+        "source_domain",
+        "duplicate_group_id",
+        "disaster_match_strength",
+        "matched_disaster_themes",
+        "location_name",
+    }
+    if required_columns.difference(clean.columns):
+        return {}
+
+    grouped: dict[str, dict[str, dict[str, Any]]] = {}
+    for row in clean.select(sorted(required_columns)).iter_rows(named=True):
+        seen_at = row.get("seen_at")
+        if not isinstance(seen_at, datetime):
+            continue
+        if row.get("disaster_match_strength") != "high":
+            continue
+        location_status = str(row.get("location_selection_status") or "")
+        if location_status in CONFIDENT_LOCATION_STATUSES and row.get("country_code"):
+            region_id = str(row["country_code"])
+            if row.get("adm1_code"):
+                region_id = f"{region_id}:{row['adm1_code']}"
+        else:
+            region_id = "UNKNOWN"
+        window_start = seen_at.replace(minute=0, second=0, microsecond=0).isoformat()
+        signal_id = _signal_id(region_id, window_start)
+        if signal_id not in wanted_signal_ids:
+            continue
+
+        source = _safe_source(row)
+        if source is None:
+            continue
+        story_id = str(row.get("duplicate_group_id") or "").strip()
+        if not story_id:
+            continue
+        story = grouped.setdefault(signal_id, {}).setdefault(
+            story_id,
+            {
+                "story_id": story_id,
+                "seen_at": seen_at.isoformat(),
+                "locations": set(),
+                "themes": set(),
+                "sources": {},
+            },
+        )
+        location_name = str(row.get("location_name") or "").strip()
+        if location_name:
+            story["locations"].add(location_name)
+        for theme in row.get("matched_disaster_themes") or []:
+            rendered_theme = str(theme).strip()
+            if rendered_theme:
+                story["themes"].add(rendered_theme)
+        story["sources"][source["url"]] = source
+
+    evidence: dict[str, list[dict[str, Any]]] = {}
+    for signal_id, stories in grouped.items():
+        rendered_stories = []
+        for story in sorted(
+            stories.values(), key=lambda item: (item["seen_at"], item["story_id"])
+        )[:MAX_EVIDENCE_STORIES]:
+            sources = sorted(
+                story["sources"].values(),
+                key=lambda item: (item["domain"], item["url"]),
+            )[:MAX_EVIDENCE_SOURCES]
+            if not sources:
+                continue
+            locations = sorted(story["locations"])
+            rendered_stories.append(
+                {
+                    "story_id": story["story_id"],
+                    "seen_at": story["seen_at"],
+                    "location": locations[0] if locations else None,
+                    "themes": sorted(story["themes"])[:MAX_EVIDENCE_THEMES],
+                    "sources": sources,
+                }
+            )
+        if rendered_stories:
+            evidence[signal_id] = rendered_stories
+    return evidence
+
+
+def _previous_evidence(snapshot: dict[str, Any] | None) -> dict[str, list[dict[str, Any]]]:
+    if not isinstance(snapshot, dict):
+        return {}
+    previous: dict[str, list[dict[str, Any]]] = {}
+    for signal in snapshot.get("signals", []):
+        if not isinstance(signal, dict) or not isinstance(signal.get("evidence"), list):
+            continue
+        code = signal.get("code")
+        window_start = signal.get("window_start")
+        if not isinstance(code, str) or not isinstance(window_start, str):
+            continue
+        rendered_stories = []
+        for story in signal["evidence"][:MAX_EVIDENCE_STORIES]:
+            if not isinstance(story, dict):
+                continue
+            story_id = str(story.get("story_id") or "").strip()
+            seen_at = str(story.get("seen_at") or "").strip()
+            if not story_id or len(story_id) > 128 or not seen_at or len(seen_at) > 40:
+                continue
+            raw_sources = story.get("sources")
+            if not isinstance(raw_sources, list):
+                continue
+            sources = []
+            for source_row in raw_sources[:MAX_EVIDENCE_SOURCES]:
+                if not isinstance(source_row, dict):
+                    continue
+                source = _safe_source(
+                    {
+                        "canonical_url": source_row.get("url"),
+                        "source_domain": source_row.get("domain"),
+                    }
+                )
+                if source is not None:
+                    sources.append(source)
+            if not sources:
+                continue
+            raw_location = story.get("location")
+            location = (
+                str(raw_location).strip()[:255]
+                if raw_location is not None and str(raw_location).strip()
+                else None
+            )
+            raw_themes = story.get("themes")
+            themes = [
+                str(theme).strip()[:100]
+                for theme in (
+                    raw_themes[:MAX_EVIDENCE_THEMES]
+                    if isinstance(raw_themes, list)
+                    else []
+                )
+                if str(theme).strip()
+            ]
+            rendered_stories.append(
+                {
+                    "story_id": story_id,
+                    "seen_at": seen_at,
+                    "location": location,
+                    "themes": themes,
+                    "sources": sources,
+                }
+            )
+        if rendered_stories:
+            previous[_signal_id(code, window_start)] = rendered_stories
+    return previous
+
+
 def build_dashboard_snapshot(
     clean_path: Path,
     feature_path: Path,
     anomaly_path: Path,
     anomaly_report_path: Path,
+    previous_snapshot: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     # Keep accepting the clean path for compatibility with existing commands. Coverage
     # totals come from feature history so an incremental refresh cannot mix a two-hour
@@ -91,14 +271,24 @@ def build_dashboard_snapshot(
         else:
             signal_rows = normal_rows
 
+    selected_rows = signal_rows.head(8).to_dicts()
+    wanted_signal_ids = {
+        _signal_id(str(row["region_id"]), row["window_start"].isoformat())
+        for row in selected_rows
+    }
+    current_evidence = _evidence_by_signal(clean_path, wanted_signal_ids)
+    prior_evidence = _previous_evidence(previous_snapshot)
+
     signals = []
-    for row in signal_rows.head(8).to_dicts():
+    for row in selected_rows:
         region_id = str(row["region_id"])
+        rendered_window_start = row["window_start"].isoformat()
+        signal_id = _signal_id(region_id, rendered_window_start)
         signals.append(
             {
                 "region": REGION_LABELS.get(region_id, region_id),
                 "code": region_id,
-                "window_start": row["window_start"].isoformat(),
+                "window_start": rendered_window_start,
                 "stories": int(row["high_confidence_story_count"]),
                 "domains": int(row["unique_domain_count"]),
                 "baseline": _rounded(row["baseline_median"]),
@@ -106,6 +296,9 @@ def build_dashboard_snapshot(
                 "status": str(row["anomaly_status"]),
                 "status_label": (
                     "Candidate" if row["is_candidate_anomaly"] else "Normal"
+                ),
+                "evidence": current_evidence.get(
+                    signal_id, prior_evidence.get(signal_id, [])
                 ),
             }
         )
@@ -160,8 +353,18 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
 
+    previous_snapshot = None
+    if args.output.exists():
+        try:
+            previous_snapshot = json.loads(args.output.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            previous_snapshot = None
     snapshot = build_dashboard_snapshot(
-        args.clean, args.features, args.anomalies, args.anomaly_report
+        args.clean,
+        args.features,
+        args.anomalies,
+        args.anomaly_report,
+        previous_snapshot,
     )
     write_dashboard_snapshot(snapshot, args.output)
     print(json.dumps({"output": str(args.output), **snapshot["snapshot"]}, indent=2))
