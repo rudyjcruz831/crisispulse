@@ -10,31 +10,37 @@ This starter proves the first local data path for CrisisPulse: ingest or load GD
 Included sample TSV                         Optional live GDELT index
         |                                             |
         |                                      Go ingestor
+        |                                  1–96 consecutive files
         |                                             |
         |                                  immutable ZIP + manifest
         |                                             |
         +--------------------+------------------------+
                              |
-                      Python cleaner
+                    Python batch cleaner
          theme filter | URL cleanup | location parser
              exact deduplication | story grouping
                              |
                              v
                  data/clean/*.parquet
                              |
-                             v
-                    DuckDB hourly counts
+                  +----------+-----------+
+                  |                      |
+                  v                      v
+          DuckDB hourly counts    ADM1/hour gold features
+                                         |
+                                         v
+                               JSON inspection report
 ```
 
 ## Components
 
 ### Go ingestor
 
-The ingestor reads GDELT's `lastupdate.txt`, selects the newest GKG ZIP, and downloads it to `data/raw`. Downloads use a temporary file followed by an atomic rename. Every new file receives a SHA-256 checksum and an entry in `manifest.jsonl`. If the destination already exists, the service reports `already_present` and does not download it again.
+The ingestor reads GDELT's `lastupdate.txt`, selects the newest GKG ZIP, and can derive up to 96 consecutive 15-minute URLs ending at that file. Downloads use a temporary file followed by an atomic rename. Every new file receives a SHA-256 checksum and an entry in `manifest.jsonl`. Existing destinations report `already_present` and are not downloaded again.
 
 ### Python cleaner
 
-The cleaner accepts an official headerless GKG ZIP/TSV or a compact headered TSV such as the included sample. It:
+The cleaner accepts one or more official headerless GKG ZIP/TSV files or compact headered fixtures. Batch mode keeps one article-identity set across the entire window. It:
 
 1. Classifies explicit disaster themes as high-confidence and ambiguous theme-only matches as weak.
 2. Canonicalizes HTTP(S) URLs and removes common tracking parameters.
@@ -47,6 +53,10 @@ The cleaner accepts an official headerless GKG ZIP/TSV or a compact headered TSV
 ### DuckDB analysis
 
 The first analysis groups cleaned records by GDELT processing hour, disaster type, and primary location. It reports article counts and unique source-domain counts without requiring a database server.
+
+### Gold feature builder
+
+The first gold layer uses `country_code:adm1_code` as the region key, falling back to country and then `UNKNOWN`. For every region, disaster type, and UTC hour it stores raw and high/weak article counts, unique domains, estimated unique stories, duplicate ratio, average tone, and story/domain velocity when the immediately preceding hour exists.
 
 ## Key decisions and limits
 
