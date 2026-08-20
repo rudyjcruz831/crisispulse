@@ -21,7 +21,8 @@ The current version costs **$0** to run: it uses local Python, DuckDB, Parquet, 
 - A readable JSON feature report for inspecting the strongest regional signals.
 - A balanced manual-review CSV with blank relevance and primary-region label fields.
 - A local scorecard for completed relevance and primary-region labels.
-- Twenty-one Python tests and three Go tests.
+- Conservative rolling median/MAD anomaly candidates with a seven-day history gate.
+- Twenty-four Python tests and three Go tests.
 
 ## Quick start on Windows
 
@@ -102,6 +103,8 @@ The batch cleaner preserves both high and weak matches for auditing, deduplicate
 data/clean/flood_articles_batch.parquet
 data/features/hourly_region_features.parquet
 data/features/hourly_region_report.json
+data/features/hourly_region_anomalies.parquet
+data/features/hourly_region_anomaly_report.json
 data/review/flood_manual_review.csv
 ```
 
@@ -114,6 +117,12 @@ After labeling, calculate the review scorecard:
   --input data/review/flood_manual_review.csv `
   --output data/review/flood_review_report.json
 ```
+
+## Anomaly readiness
+
+The batch command also creates a conservative anomaly-scoring table. It fills missing region-hours with zero and uses only prior observations in a rolling median/MAD baseline. A row cannot become a candidate until it has at least 168 prior hourly observations, three high-confidence stories, three source domains, and an increase of at least three stories. The default robust-z threshold is `6.0`.
+
+With the current two-hour validation window, every row correctly reports `insufficient_history`; the project does not present those rows as disaster alerts.
 
 ## Repository map
 
@@ -139,6 +148,7 @@ docs/data-dictionary.md    Clean Parquet field definitions
 - Location selection is a transparent starter heuristic, not a full geocoder. Tied multi-region articles are routed to `UNKNOWN` until reviewed.
 - ADM1 region IDs use GDELT/FIPS-style country and administrative codes, not guaranteed ISO codes.
 - Two hours of data can verify mechanics but cannot provide a stable anomaly baseline.
+- An anomaly candidate measures unusual news reporting, not proof of a physical disaster.
 
 ### First live validation
 

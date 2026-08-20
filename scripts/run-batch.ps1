@@ -37,3 +37,9 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     --input data/features/hourly_region_features.parquet `
     --output data/features/hourly_region_report.json
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+& $Python -m pipelines.score_anomalies `
+    --input data/features/hourly_region_features.parquet `
+    --output data/features/hourly_region_anomalies.parquet `
+    --report data/features/hourly_region_anomaly_report.json
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

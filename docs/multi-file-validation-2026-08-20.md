@@ -73,6 +73,12 @@ The questionable Hawaii story still retains `Big Island, New Hampshire` as the s
 
 The generated 40-row review CSV contains ten rows from each of four buckets: high/assigned, high/location-review, weak/assigned, and weak/location-review. Its relevance, primary-region, and notes columns are intentionally blank for human labels.
 
+## Anomaly-readiness follow-up
+
+The first anomaly scorer uses a 30-day rolling lookback but refuses to score a candidate until at least seven days (168 hours) of prior zero-filled observations exist. It also requires three high-confidence stories, three source domains, a three-story increase, and a robust-z threshold of `6.0`.
+
+Running it against this two-hour validation window produces zero candidates and marks every scored row `insufficient_history`. This is the intended result: the pipeline exposes that it is not ready instead of manufacturing an alert from an undersized baseline.
+
 ## Reproduce locally
 
 Download the most recent two-hour window:
@@ -94,9 +100,11 @@ Generated outputs:
 data/clean/flood_articles_batch.parquet
 data/features/hourly_region_features.parquet
 data/features/hourly_region_report.json
+data/features/hourly_region_anomalies.parquet
+data/features/hourly_region_anomaly_report.json
 data/review/flood_manual_review.csv
 ```
 
 ## Next validation
 
-Label the 40-row review CSV, measure disaster-match and regional-assignment quality by bucket, and use the results to tune the theme and location rules. Then collect enough hourly windows for a robust median/MAD baseline. No anomaly threshold should be presented as meaningful from this two-hour sample.
+Label the 40-row review CSV, measure disaster-match and regional-assignment quality by bucket, and use the results to tune the theme and location rules. Then collect at least seven days of hourly windows and evaluate candidate stability before treating the default threshold as meaningful.
