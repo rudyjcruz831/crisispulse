@@ -90,3 +90,20 @@ func TestGKGWindowURLsReturnsOldestToNewest(t *testing.T) {
 		}
 	}
 }
+
+func TestGKGWindowURLsSupportsSevenDaysAndRejectsMore(t *testing.T) {
+	latest := "http://data.gdeltproject.org/gdeltv2/20260820144500.gkg.csv.zip"
+	urls, err := gkgWindowURLs(latest, maxIntervals)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(urls) != 672 {
+		t.Fatalf("got %d URLs, want 672", len(urls))
+	}
+	if urls[len(urls)-1] != latest {
+		t.Fatalf("last URL = %q, want %q", urls[len(urls)-1], latest)
+	}
+	if _, err := gkgWindowURLs(latest, maxIntervals+1); err == nil {
+		t.Fatal("expected an error above the seven-day limit")
+	}
+}

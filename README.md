@@ -7,7 +7,7 @@ The current version costs **$0** to run: it uses local Python, DuckDB, Parquet, 
 ## What works now
 
 - A Go ingestor that discovers and safely downloads the newest GDELT GKG file.
-- Consecutive-window ingestion for up to 96 fifteen-minute files (24 hours).
+- Consecutive-window ingestion for up to 672 fifteen-minute files (seven days).
 - An immutable raw-file layout with SHA-256 checksums and a JSON Lines manifest.
 - A Python cleaner for official GKG ZIP/TSV files and compact headered samples.
 - High/weak flood and wildfire theme classification (the sample run uses high-confidence floods).
@@ -79,6 +79,20 @@ Download the latest two hours as eight consecutive files:
 docker compose --profile live run --rm ingestor --intervals 8 --output-dir /app/data/raw
 ```
 
+Download the latest seven days as 672 files. A current window is roughly 4 GB, depending on GDELT file sizes:
+
+```powershell
+docker compose --profile live run --rm ingestor --intervals 672 --output-dir /app/data/raw
+```
+
+If Docker is unavailable, the local fallback stores the large raw archive outside OneDrive by default and then runs the same batch pipeline:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\run-history.ps1
+```
+
+The history runner merges each compact feature batch into `data/history/hourly_region_features.parquet`, replacing overlapping region/hour keys. Future runs can therefore extend the baseline without retaining every multi-gigabyte raw window in the repository.
+
 To clean a downloaded ZIP, replace the filename below with the one in `data/raw`:
 
 ```powershell
@@ -122,7 +136,7 @@ After labeling, calculate the review scorecard:
 
 The batch command also creates a conservative anomaly-scoring table. It fills missing region-hours with zero and uses only prior observations in a rolling median/MAD baseline. A row cannot become a candidate until it has at least 168 prior hourly observations, three high-confidence stories, three source domains, and an increase of at least three stories. The default robust-z threshold is `6.0`.
 
-With the current two-hour validation window, every row correctly reports `insufficient_history`; the project does not present those rows as disaster alerts.
+The seven-day validation produced the first fully eligible hour: two rows were classified as normal and zero alert candidates were created. This confirms the history gate opens without manufacturing alerts; it does not mean no floods occurred.
 
 ## Repository map
 
@@ -131,8 +145,10 @@ cmd/ingestor/              Go live-file downloader
 pipelines/                 Python cleaning, batch aggregation, features, and reports
 data/sample/               Tiny, versioned GKG-format fixture
 data/raw/                  Immutable downloads (ignored by Git)
+%LOCALAPPDATA%/CrisisPulse/raw/  Default seven-day cache outside OneDrive
 data/clean/                Generated Parquet files (ignored by Git)
 data/review/               Generated human-labeling CSV files (ignored by Git)
+data/history/              Compact accumulated feature history (ignored by Git)
 tests/                     Python unit and pipeline tests
 scripts/                   Windows setup, run, and test commands
 docs/architecture.md       Design decisions and data flow
@@ -147,15 +163,15 @@ docs/data-dictionary.md    Clean Parquet field definitions
 - `seen_at` is when GDELT processed a record, not necessarily when the source article was published.
 - Location selection is a transparent starter heuristic, not a full geocoder. Tied multi-region articles are routed to `UNKNOWN` until reviewed.
 - ADM1 region IDs use GDELT/FIPS-style country and administrative codes, not guaranteed ISO codes.
-- Two hours of data can verify mechanics but cannot provide a stable anomaly baseline.
+- Seven days opens the first eligible scoring hour but is not yet enough to evaluate candidate stability over time.
 - An anomaly candidate measures unusual news reporting, not proof of a physical disaster.
 
 ### First live validation
 
 The cleaner has been exercised against a current 15-minute GKG update. That run exposed and fixed the live nine-field `V2ENHANCEDLOCATIONS` layout (including ADM2), and showed that `NATURAL_DISASTER_FLOODED` often describes metaphorical flooding. Both cases are now covered by regression tests. Live ZIPs and generated Parquet files remain local and are excluded from Git.
 
-These constraints are deliberate. The next milestone is to label the generated review set and collect enough hourly windows for a robust anomaly baseline.
+These constraints are deliberate. The next milestone is to label the generated review set and keep extending the compact hourly history so candidate stability can be measured across many eligible hours.
 
 ## Design reference
 
-See [the architecture](docs/architecture.md) for component details, [the data dictionary](docs/data-dictionary.md) for the Parquet schemas, [the first live validation](docs/live-validation-2026-08-20.md), and [the multi-file validation](docs/multi-file-validation-2026-08-20.md).
+See [the architecture](docs/architecture.md) for component details, [the data dictionary](docs/data-dictionary.md) for the Parquet schemas, [the first live validation](docs/live-validation-2026-08-20.md), [the multi-file validation](docs/multi-file-validation-2026-08-20.md), and [the seven-day validation](docs/seven-day-validation-2026-08-20.md).

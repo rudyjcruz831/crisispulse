@@ -10,7 +10,7 @@ This starter proves the first local data path for CrisisPulse: ingest or load GD
 Included sample TSV                         Optional live GDELT index
         |                                             |
         |                                      Go ingestor
-        |                                  1–96 consecutive files
+        |                                  1–672 consecutive files
         |                                             |
         |                                  immutable ZIP + manifest
         |                                             |
@@ -38,7 +38,11 @@ Included sample TSV                         Optional live GDELT index
 
 ### Go ingestor
 
-The ingestor reads GDELT's `lastupdate.txt`, selects the newest GKG ZIP, and can derive up to 96 consecutive 15-minute URLs ending at that file. Downloads use a temporary file followed by an atomic rename. Every new file receives a SHA-256 checksum and an entry in `manifest.jsonl`. Existing destinations report `already_present` and are not downloaded again.
+The ingestor reads GDELT's `lastupdate.txt`, selects the newest GKG ZIP, and can derive up to 672 consecutive 15-minute URLs ending at that file (seven days). Downloads use a temporary file followed by an atomic rename. Every new file receives a SHA-256 checksum and an entry in `manifest.jsonl`. Existing destinations report `already_present` and are not downloaded again.
+
+When Docker or Go is unavailable, the Python standard-library downloader applies the same seven-day limit, checksum manifest, atomic rename, and idempotency rules. Its Windows runner defaults to `%LOCALAPPDATA%\CrisisPulse\raw` so multi-gigabyte raw history is not synchronized through OneDrive.
+
+After each history run, the compact feature merger atomically updates a local Parquet history keyed by hour, region, and disaster type. Overlapping batches replace the same keys instead of double-counting. The anomaly scorer reads this accumulated history, allowing raw ZIP retention to follow the user's storage policy independently of baseline continuity.
 
 ### Python cleaner
 
