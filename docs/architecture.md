@@ -2,7 +2,7 @@
 
 ## Goal
 
-This local MVP ingests GDELT GKG records, isolates flood reporting, builds explainable regional/hourly features, scores history-gated anomaly candidates, and presents the evidence in a read-only dashboard. It deliberately excludes cloud infrastructure and machine learning.
+This local MVP ingests GDELT GKG records, isolates flood reporting, builds explainable regional/hourly features, scores history-gated anomaly candidates, and presents the evidence in a local review dashboard. It deliberately excludes cloud infrastructure and machine learning.
 
 ## Data flow
 
@@ -90,6 +90,8 @@ The exporter combines coverage totals from compact feature history, anomaly para
 The standard-library Go API reads that file on every request, so a completed history run becomes visible without restarting the service. It exposes a health check, the complete snapshot, a smaller signals projection, and a local review endpoint. Snapshot responses are read-only, size-limited, and no-store. Review writes accept only three validated decisions from the configured local dashboard origin.
 
 Review decisions use a bounded append-only JSON Lines audit log. Re-labeling a region/hour adds a new record; reads collapse the log to the latest decision per stable signal ID. This keeps the data inspectable and preserves corrections without adding a database. The React dashboard uses the API when it is reachable and falls back to its bundled verified snapshot when it is not. Review buttons remain disabled without the local API.
+
+The dashboard exporter also attaches a bounded evidence bundle to each displayed signal. Clean rows are matched by region and UTC hour, grouped by duplicate-adjusted story ID, and limited to eight stories with eight publisher URLs per story. When an older candidate is still displayed but its clean hour is no longer in the incremental batch, the exporter carries forward its previously captured evidence. GDELT publisher URLs are retained as direct links; the interface does not claim that URL-derived labels are verified headlines.
 
 The first dashboard remains local and has no authentication, map service, remote database, or paid API.
 

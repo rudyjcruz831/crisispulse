@@ -23,7 +23,7 @@ The default address is `http://127.0.0.1:8080`, and the default allowed dashboar
 | Method | Path | Purpose |
 |---|---|---|
 | `GET` | `/health` | Confirm the API process is available. |
-| `GET` | `/api/v1/snapshot` | Return the complete dashboard snapshot. |
+| `GET` | `/api/v1/snapshot` | Return the complete dashboard snapshot, including bounded source evidence for displayed signals. |
 | `GET` | `/api/v1/signals` | Return the update time, candidate count, and supported signal rows. |
 | `GET` | `/api/v1/reviews` | Return the latest saved decision for each reviewed signal. |
 | `POST` | `/api/v1/reviews` | Append a validated review decision to the local audit log. |
@@ -75,6 +75,7 @@ The default address is `http://127.0.0.1:8080`, and the default allowed dashboar
 
 - Snapshot and signal routes remain read-only. The review route accepts only `GET`, `HEAD`, and validated JSON `POST` requests.
 - Snapshot responses use `Cache-Control: no-store` and are capped at 2 MiB.
+- Signal evidence is limited to eight distinct story groups and eight validated HTTP(S) publisher links per story.
 - Review requests are capped at 16 KiB, the append-only review log is capped at 4 MiB, and untrusted browser origins are rejected before writes.
 - Internal file paths and parser errors are logged locally but not returned to callers.
 - The API writes only the local review log. It has no remote accounts, paid services, or public network listener.

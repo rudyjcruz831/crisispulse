@@ -56,6 +56,9 @@ test("removes the disposable starter preview", async () => {
   assert.match(page, /Real event/);
   assert.match(page, /Irrelevant news/);
   assert.match(page, /Uncertain/);
+  assert.match(page, /Direct publisher evidence/);
+  assert.match(page, /Compare publisher versions/);
+  assert.match(page, /GDELT supplies publisher URLs rather than verified headlines/);
   assert.match(page, /const snapshotURL = "\/api\/v1\/snapshot"/);
   assert.match(page, /const reviewsURL = "\/api\/v1\/reviews"/);
   assert.doesNotMatch(page, /127\.0\.0\.1:8080/);
