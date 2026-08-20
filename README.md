@@ -24,6 +24,7 @@ The current version costs **$0** to run: it uses local Python, DuckDB, Parquet, 
 - Conservative rolling median/MAD anomaly candidates with a seven-day history gate.
 - A local React evidence dashboard generated from the latest pipeline outputs.
 - A local Go API for health, complete snapshot, and supported-signal responses.
+- A safe local 15-minute refresh workflow with locking, seven-day raw retention, and run status.
 - Twenty-nine Python tests, nine Go tests, and two dashboard rendering tests.
 
 ## Quick start on Windows
@@ -165,6 +166,24 @@ Run the complete Python, Go, and dashboard test suite with:
 powershell -ExecutionPolicy Bypass -File .\scripts\test.ps1
 ```
 
+## Automatic local refresh
+
+Run one incremental refresh manually before scheduling it:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\run-refresh.ps1
+```
+
+The refresh downloads the newest two-hour overlap, processes from the first safe hour boundary, merges it into compact history, refreshes anomaly scores, and writes the live API snapshot to `%USERPROFILE%\.crisispulse\dashboard.json`. Raw ZIP retention is capped at 672 files (seven days) outside OneDrive. Concurrent runs are skipped, and the latest outcome is recorded at `%USERPROFILE%\.crisispulse\refresh-status.json`.
+
+After a successful manual run, the optional Windows task can run it every 15 minutes:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\install-refresh-task.ps1
+```
+
+Remove the task at any time with `scripts\uninstall-refresh-task.ps1`. See [the automation guide](docs/automation.md) before enabling it.
+
 ## Repository map
 
 ```text
@@ -173,7 +192,7 @@ cmd/api/                   Go signals API
 pipelines/                 Python cleaning, batch aggregation, features, and reports
 data/sample/               Tiny, versioned GKG-format fixture
 data/raw/                  Immutable downloads (ignored by Git)
-%LOCALAPPDATA%/CrisisPulse/raw/  Default seven-day cache outside OneDrive
+%USERPROFILE%/.crisispulse/raw/  Default seven-day cache outside OneDrive
 data/clean/                Generated Parquet files (ignored by Git)
 data/review/               Generated human-labeling CSV files (ignored by Git)
 data/history/              Compact accumulated feature history (ignored by Git)
@@ -203,4 +222,4 @@ These constraints are deliberate. The next milestone is to label the generated r
 
 ## Design reference
 
-See [the architecture](docs/architecture.md) for component details, [the API reference](docs/api.md), [the data dictionary](docs/data-dictionary.md) for the Parquet schemas, [the first live validation](docs/live-validation-2026-08-20.md), [the multi-file validation](docs/multi-file-validation-2026-08-20.md), and [the seven-day validation](docs/seven-day-validation-2026-08-20.md).
+See [the architecture](docs/architecture.md) for component details, [the automation guide](docs/automation.md), [the API reference](docs/api.md), [the data dictionary](docs/data-dictionary.md) for the Parquet schemas, [the first live validation](docs/live-validation-2026-08-20.md), [the multi-file validation](docs/multi-file-validation-2026-08-20.md), and [the seven-day validation](docs/seven-day-validation-2026-08-20.md).

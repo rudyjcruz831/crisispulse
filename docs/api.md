@@ -1,6 +1,6 @@
 # CrisisPulse local API
 
-The first API is a read-only Go service that exposes the latest versioned dashboard snapshot. It uses only the Go standard library and reads `dashboard/data/dashboard.json` on each request, so the history pipeline can refresh data without restarting the service.
+The first API is a read-only Go service that exposes the latest dashboard snapshot. It uses only the Go standard library and reads the runtime JSON file on each request, so the history pipeline can refresh data without restarting the service.
 
 ## Start locally
 
@@ -16,7 +16,7 @@ Start the API from the repository root:
 powershell -ExecutionPolicy Bypass -File .\scripts\run-api.ps1
 ```
 
-The default address is `http://127.0.0.1:8080`, and the default allowed dashboard origin is `http://localhost:3000`.
+The default address is `http://127.0.0.1:8080`, and the default allowed dashboard origin is `http://localhost:3000`. The API reads `%USERPROFILE%\.crisispulse\dashboard.json`, which the refresh runner replaces after each successful cycle. Override it with `scripts\run-api.ps1 -DataPath <path>` when needed.
 
 ## Endpoints
 

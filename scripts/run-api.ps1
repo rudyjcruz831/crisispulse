@@ -1,6 +1,6 @@
 param(
     [string]$Address = "127.0.0.1:8080",
-    [string]$DataPath = "dashboard/data/dashboard.json",
+    [string]$DataPath = "",
     [string]$AllowedOrigin = "http://localhost:3000"
 )
 
@@ -21,10 +21,15 @@ else {
 $RepositoryRoot = Split-Path -Parent $PSScriptRoot
 Push-Location $RepositoryRoot
 try {
-    & $GoExecutable run ./cmd/api `
-        --addr $Address `
-        --data $DataPath `
-        --allowed-origin $AllowedOrigin
+    $ApiArguments = @(
+        "run", "./cmd/api",
+        "--addr", $Address,
+        "--allowed-origin", $AllowedOrigin
+    )
+    if ($DataPath) {
+        $ApiArguments += @("--data", $DataPath)
+    }
+    & $GoExecutable @ApiArguments
     $ExitCode = $LASTEXITCODE
 }
 finally {

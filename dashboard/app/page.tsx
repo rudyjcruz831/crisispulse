@@ -104,7 +104,7 @@ export default function Home() {
         </aside>
       </section>
 
-      <section className="metrics" aria-label="Seven-day data coverage">
+      <section className="metrics" aria-label="Data coverage">
         <article>
           <p>Flood articles retained</p>
           <strong>{formatNumber(snapshot.clean_articles)}</strong>
@@ -121,9 +121,9 @@ export default function Home() {
           <span>{snapshot.window_label}</span>
         </article>
         <article>
-          <p>Flood story groups</p>
+          <p>Hourly story groups</p>
           <strong>{formatNumber(snapshot.story_groups)}</strong>
-          <span>After duplicate grouping</span>
+          <span>Distinct within each region and hour</span>
         </article>
       </section>
 
