@@ -1,0 +1,16 @@
+services:
+  pipeline:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./data:/app/data
+
+  ingestor:
+    profiles: ["live"]
+    build:
+      context: .
+      dockerfile: Dockerfile.ingestor
+    volumes:
+      - ./data:/app/data
+    command: ["--output-dir", "/app/data/raw"]
