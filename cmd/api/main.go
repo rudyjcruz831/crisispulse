@@ -21,6 +21,7 @@ const maxDashboardBytes = 2 << 20
 type config struct {
 	address       string
 	dataPath      string
+	reviewPath    string
 	allowedOrigin string
 }
 
@@ -40,6 +41,7 @@ type signalsResponse struct {
 
 type api struct {
 	dataPath string
+	reviews  *reviewStore
 	logger   *log.Logger
 }
 
@@ -48,7 +50,7 @@ func main() {
 	logger := log.New(os.Stdout, "crisispulse-api ", log.LstdFlags|log.LUTC)
 	server := &http.Server{
 		Addr:              cfg.address,
-		Handler:           newHandler(cfg.dataPath, cfg.allowedOrigin, logger),
+		Handler:           newHandler(cfg.dataPath, cfg.reviewPath, cfg.allowedOrigin, logger),
 		ReadHeaderTimeout: 5 * time.Second,
 		WriteTimeout:      10 * time.Second,
 		IdleTimeout:       60 * time.Second,
@@ -81,6 +83,7 @@ func parseFlags() config {
 	var cfg config
 	flag.StringVar(&cfg.address, "addr", "127.0.0.1:8080", "HTTP listen address")
 	flag.StringVar(&cfg.dataPath, "data", defaultDashboardPath(), "dashboard snapshot JSON")
+	flag.StringVar(&cfg.reviewPath, "reviews", defaultReviewPath(), "review decision log")
 	flag.StringVar(&cfg.allowedOrigin, "allowed-origin", "http://localhost:3000", "allowed dashboard origin")
 	flag.Parse()
 	return cfg
@@ -94,12 +97,25 @@ func defaultDashboardPath() string {
 	return filepath.Join(homeRoot, ".crisispulse", "dashboard.json")
 }
 
-func newHandler(dataPath, allowedOrigin string, logger *log.Logger) http.Handler {
-	service := &api{dataPath: dataPath, logger: logger}
+func defaultReviewPath() string {
+	homeRoot, err := os.UserHomeDir()
+	if err != nil {
+		return "data/review/reviews.jsonl"
+	}
+	return filepath.Join(homeRoot, ".crisispulse", "reviews.jsonl")
+}
+
+func newHandler(dataPath, reviewPath, allowedOrigin string, logger *log.Logger) http.Handler {
+	service := &api{
+		dataPath: dataPath,
+		reviews:  newReviewStore(reviewPath),
+		logger:   logger,
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", service.health)
 	mux.HandleFunc("/api/v1/snapshot", service.snapshot)
 	mux.HandleFunc("/api/v1/signals", service.signals)
+	mux.HandleFunc("/api/v1/reviews", service.reviewDecisions)
 	return withCORS(mux, allowedOrigin)
 }
 
@@ -192,16 +208,16 @@ func requireGet(writer http.ResponseWriter, request *http.Request) bool {
 func withCORS(next http.Handler, allowedOrigin string) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		origin := request.Header.Get("Origin")
-		if origin != "" && origin == allowedOrigin {
+		if origin != "" && origin != allowedOrigin {
+			writeError(writer, http.StatusForbidden, "origin not allowed")
+			return
+		}
+		if origin != "" {
 			writer.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
 			writer.Header().Set("Vary", "Origin")
 		}
 		if request.Method == http.MethodOptions {
-			if origin != "" && origin != allowedOrigin {
-				writeError(writer, http.StatusForbidden, "origin not allowed")
-				return
-			}
-			writer.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
+			writer.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, POST, OPTIONS")
 			writer.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 			writer.WriteHeader(http.StatusNoContent)
 			return

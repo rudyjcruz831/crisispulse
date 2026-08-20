@@ -1,6 +1,6 @@
 # CrisisPulse local API
 
-The first API is a read-only Go service that exposes the latest dashboard snapshot. It uses only the Go standard library and reads the runtime JSON file on each request, so the history pipeline can refresh data without restarting the service.
+The local Go service exposes the latest dashboard snapshot and stores human review decisions. It uses only the Go standard library and reads the runtime JSON file on each request, so the history pipeline can refresh data without restarting the service.
 
 ## Start locally
 
@@ -16,7 +16,7 @@ Start the API from the repository root:
 powershell -ExecutionPolicy Bypass -File .\scripts\run-api.ps1
 ```
 
-The default address is `http://127.0.0.1:8080`, and the default allowed dashboard origin is `http://localhost:3000`. The API reads `%USERPROFILE%\.crisispulse\dashboard.json`, which the refresh runner replaces after each successful cycle. Override it with `scripts\run-api.ps1 -DataPath <path>` when needed.
+The default address is `http://127.0.0.1:8080`, and the default allowed dashboard origin is `http://localhost:3000`. The API reads `%USERPROFILE%\.crisispulse\dashboard.json`, which the refresh runner replaces after each successful cycle, and appends decisions to `%USERPROFILE%\.crisispulse\reviews.jsonl`. Override these locations with `scripts\run-api.ps1 -DataPath <path> -ReviewPath <path>` when needed.
 
 ## Endpoints
 
@@ -25,6 +25,8 @@ The default address is `http://127.0.0.1:8080`, and the default allowed dashboar
 | `GET` | `/health` | Confirm the API process is available. |
 | `GET` | `/api/v1/snapshot` | Return the complete dashboard snapshot. |
 | `GET` | `/api/v1/signals` | Return the update time, candidate count, and supported signal rows. |
+| `GET` | `/api/v1/reviews` | Return the latest saved decision for each reviewed signal. |
+| `POST` | `/api/v1/reviews` | Append a validated review decision to the local audit log. |
 
 ### Health response
 
@@ -34,6 +36,18 @@ The default address is `http://127.0.0.1:8080`, and the default allowed dashboar
   "status": "ok"
 }
 ```
+
+### Save a review decision
+
+```json
+{
+  "region_code": "US:USMN",
+  "window_start": "2026-08-20T21:00:00",
+  "decision": "confirmed_event"
+}
+```
+
+`decision` must be `confirmed_event`, `irrelevant_news`, or `uncertain`. Posting another decision for the same region and hour preserves the earlier audit entry while making the latest value current.
 
 ### Signals response
 
@@ -59,8 +73,10 @@ The default address is `http://127.0.0.1:8080`, and the default allowed dashboar
 
 ## Safety and scope
 
-- The service accepts only `GET`, `HEAD`, and local CORS preflight requests.
+- Snapshot and signal routes remain read-only. The review route accepts only `GET`, `HEAD`, and validated JSON `POST` requests.
 - Snapshot responses use `Cache-Control: no-store` and are capped at 2 MiB.
+- Review requests are capped at 16 KiB, the append-only review log is capped at 4 MiB, and untrusted browser origins are rejected before writes.
 - Internal file paths and parser errors are logged locally but not returned to callers.
-- The API does not write data, authenticate users, call paid services, or claim that a candidate is a verified physical disaster.
+- The API writes only the local review log. It has no remote accounts, paid services, or public network listener.
+- A `confirmed_event` review is a human label for model evaluation; it is not an emergency warning.
 - The dashboard falls back to its bundled verified snapshot if the API cannot be reached.

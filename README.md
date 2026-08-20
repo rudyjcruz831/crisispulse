@@ -2,7 +2,7 @@
 
 CrisisPulse is a portfolio project for detecting emerging disaster signals in GDELT news reporting. This starter implements the first local, explainable pipeline for flood-related GKG records. It does **not** claim to predict physical disasters before they occur.
 
-The current version costs **$0** to run: it uses local Python, DuckDB, Parquet, Docker, Go, and public GDELT data. It has no cloud resources, paid APIs, credentials, or background services.
+The current version costs **$0** to run: it uses local Python, DuckDB, Parquet, Docker, Go, and public GDELT data. It has no cloud resources, paid APIs, or credentials; the optional background refresh is a local Windows task.
 
 ## What works now
 
@@ -25,7 +25,8 @@ The current version costs **$0** to run: it uses local Python, DuckDB, Parquet, 
 - A local React evidence dashboard generated from the latest pipeline outputs.
 - A local Go API for health, complete snapshot, and supported-signal responses.
 - A safe local 15-minute refresh workflow with locking, seven-day raw retention, and run status.
-- Twenty-nine Python tests, nine Go tests, and two dashboard rendering tests.
+- A local human-review queue with persistent real-event, irrelevant-news, and uncertain labels.
+- Twenty-nine Python tests, twelve Go tests, and two dashboard rendering tests.
 
 ## Quick start on Windows
 
@@ -150,7 +151,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\setup-go.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\run-api.ps1
 ```
 
-The history runner refreshes `dashboard/data/dashboard.json` from the real clean, feature, and anomaly outputs. Start the read-only dashboard locally with:
+The history runner refreshes the runtime dashboard snapshot from the real clean, feature, and anomaly outputs. Start the dashboard locally with:
 
 ```powershell
 cd dashboard
@@ -158,7 +159,7 @@ npm install
 npm run dev
 ```
 
-The dashboard shows current candidate counts, supported regional evidence, scoring readiness, and the alert guardrails. It connects to the Go API when available and visibly falls back to the last verified snapshot when the API is stopped. It requires no paid API and never presents an unusual news pattern as a verified disaster.
+The dashboard shows current candidate counts, supported regional evidence, scoring readiness, alert guardrails, and a human-review queue. Candidate decisions are appended to `%USERPROFILE%\.crisispulse\reviews.jsonl` and can be changed without losing the earlier audit entries. It connects to the Go API when available and visibly falls back to the last verified snapshot when the API is stopped. It requires no paid API and never presents an unusual news pattern as a verified disaster.
 
 Run the complete Python, Go, and dashboard test suite with:
 
