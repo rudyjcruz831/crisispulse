@@ -22,7 +22,7 @@ import (
 // GDELT currently publishes this data endpoint over HTTP. The downloaded file
 // receives a SHA-256 checksum in the local manifest for reproducible processing.
 const defaultIndexURL = "http://data.gdeltproject.org/gdeltv2/lastupdate.txt"
-const maxIntervals = 96
+const maxIntervals = 7 * 24 * 4
 
 type config struct {
 	indexURL  string
@@ -55,7 +55,7 @@ func parseFlags() config {
 	flag.StringVar(&cfg.indexURL, "index-url", defaultIndexURL, "GDELT last-update index URL")
 	flag.StringVar(&cfg.sourceURL, "source-url", "", "download this GKG ZIP directly instead of reading the index")
 	flag.StringVar(&cfg.outputDir, "output-dir", "data/raw", "directory for immutable source files")
-	flag.IntVar(&cfg.intervals, "intervals", 1, "number of consecutive 15-minute GKG files, ending at the selected file (maximum 96)")
+	flag.IntVar(&cfg.intervals, "intervals", 1, "number of consecutive 15-minute GKG files, ending at the selected file (maximum 672 / seven days)")
 	flag.DurationVar(&cfg.timeout, "timeout", 2*time.Minute, "HTTP request timeout")
 	flag.Parse()
 	return cfg

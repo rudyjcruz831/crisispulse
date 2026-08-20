@@ -1,4 +1,4 @@
-.PHONY: setup sample counts batch test docker-sample docker-live docker-window
+.PHONY: setup sample counts batch test docker-sample docker-live docker-window docker-week
 
 setup:
 	python -m venv .venv
@@ -29,3 +29,6 @@ docker-live:
 
 docker-window:
 	docker compose --profile live run --rm ingestor --intervals 8 --output-dir /app/data/raw
+
+docker-week:
+	docker compose --profile live run --rm ingestor --intervals 672 --output-dir /app/data/raw
