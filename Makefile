@@ -13,6 +13,7 @@ counts:
 
 batch:
 	.venv/bin/python -m pipelines.batch_clean --input-dir data/raw --output data/clean/flood_articles_batch.parquet --disaster flood --minimum-strength weak
+	.venv/bin/python -m pipelines.build_review_set --input data/clean/flood_articles_batch.parquet --output data/review/flood_manual_review.csv --size 40
 	.venv/bin/python -m pipelines.build_features --input data/clean/flood_articles_batch.parquet --output data/features/hourly_region_features.parquet
 	.venv/bin/python -m pipelines.inspect_features --input data/features/hourly_region_features.parquet --output data/features/hourly_region_report.json
 

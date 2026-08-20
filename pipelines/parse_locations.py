@@ -22,6 +22,13 @@ class GDELTLocation:
         return asdict(self)
 
 
+@dataclass(frozen=True)
+class PrimaryLocationSelection:
+    location: GDELTLocation | None
+    status: str
+    candidate_regions: tuple[str, ...]
+
+
 def _integer(value: str) -> int | None:
     try:
         return int(value)
@@ -93,16 +100,27 @@ def distinct_location_count(locations: list[GDELTLocation]) -> int:
     return len({location_key(location) for location in locations})
 
 
-def choose_primary_location(locations: list[GDELTLocation]) -> GDELTLocation | None:
-    """Prefer a valid, specific, frequently mentioned, early location."""
+def location_region_id(location: GDELTLocation) -> str | None:
+    """Return the most specific regional key available for one location."""
+    if location.country_code and location.adm1_code:
+        return f"{location.country_code}:{location.adm1_code}"
+    return location.country_code
+
+
+def select_primary_location(locations: list[GDELTLocation]) -> PrimaryLocationSelection:
+    """Select a location and describe whether its regional assignment is safe."""
     if not locations:
-        return None
+        return PrimaryLocationSelection(None, "missing", ())
 
     counts: dict[tuple[object, ...], int] = {}
     representatives: dict[tuple[object, ...], GDELTLocation] = {}
+    region_counts: dict[str, int] = {}
     for location in locations:
         key = location_key(location)
         counts[key] = counts.get(key, 0) + 1
+        region_id = location_region_id(location)
+        if region_id:
+            region_counts[region_id] = region_counts.get(region_id, 0) + 1
         current = representatives.get(key)
         current_offset = current.character_offset if current else None
         if current is None or (
@@ -111,9 +129,38 @@ def choose_primary_location(locations: list[GDELTLocation]) -> GDELTLocation | N
         ):
             representatives[key] = location
 
+    candidate_regions = tuple(
+        region_id
+        for region_id, _ in sorted(
+            region_counts.items(), key=lambda item: (-item[1], item[0])
+        )
+    )
+    if not candidate_regions:
+        status = "unresolved_region"
+        preferred_region = None
+    elif len(candidate_regions) == 1:
+        status = "single_region"
+        preferred_region = candidate_regions[0]
+    else:
+        ranked_counts = sorted(region_counts.values(), reverse=True)
+        if ranked_counts[0] >= 2 * ranked_counts[1]:
+            status = "dominant_region"
+            preferred_region = candidate_regions[0]
+        else:
+            status = "ambiguous_region"
+            preferred_region = None
+
+    candidates = list(representatives.values())
+    if preferred_region:
+        candidates = [
+            location
+            for location in candidates
+            if location_region_id(location) == preferred_region
+        ]
+
     specificity = {3: 4, 4: 4, 2: 3, 5: 3, 1: 2}
-    return max(
-        representatives.values(),
+    primary = max(
+        candidates,
         key=lambda location: (
             int(location.valid_coordinates),
             specificity.get(location.location_type, 1),
@@ -122,3 +169,9 @@ def choose_primary_location(locations: list[GDELTLocation]) -> GDELTLocation | N
             -(location.character_offset if location.character_offset is not None else 10**12),
         ),
     )
+    return PrimaryLocationSelection(primary, status, candidate_regions)
+
+
+def choose_primary_location(locations: list[GDELTLocation]) -> GDELTLocation | None:
+    """Backward-compatible shortcut for callers that only need the location."""
+    return select_primary_location(locations).location

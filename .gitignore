@@ -10,3 +10,4 @@ data/clean/*
 !data/clean/.gitkeep
 data/features/*
 !data/features/.gitkeep
+data/review/*

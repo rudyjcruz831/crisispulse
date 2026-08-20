@@ -20,6 +20,8 @@ REQUIRED_COLUMNS = {
     "disaster_match_strength",
     "tone",
 }
+CONFIDENT_LOCATION_STATUSES = {"single_region", "dominant_region", "legacy"}
+REVIEW_LOCATION_STATUSES = {"missing", "ambiguous_region", "unresolved_region"}
 
 
 @dataclass
@@ -30,30 +32,54 @@ class FeatureStats:
     regions: int
 
 
-def _region_id() -> pl.Expr:
-    return (
-        pl.when(pl.col("country_code").is_not_null() & pl.col("adm1_code").is_not_null())
-        .then(pl.concat_str(["country_code", "adm1_code"], separator=":"))
-        .when(pl.col("country_code").is_not_null())
-        .then(pl.col("country_code"))
-        .otherwise(pl.lit("UNKNOWN"))
-        .alias("region_id")
-    )
-
-
 def build_features(input_path: Path, output_path: Path) -> FeatureStats:
     frame = pl.read_parquet(input_path)
     missing = REQUIRED_COLUMNS.difference(frame.columns)
     if missing:
         raise ValueError(f"clean dataset is missing columns: {sorted(missing)}")
 
+    location_status = (
+        pl.col("location_selection_status")
+        if "location_selection_status" in frame.columns
+        else pl.lit("legacy")
+    )
     prepared = frame.filter(pl.col("seen_at").is_not_null()).with_columns(
         pl.col("seen_at").dt.truncate("1h").alias("window_start"),
-        _region_id(),
+        location_status.alias("_location_selection_status"),
+    )
+    location_is_confident = pl.col("_location_selection_status").is_in(
+        CONFIDENT_LOCATION_STATUSES
+    )
+    prepared = prepared.with_columns(
+        pl.when(location_is_confident)
+        .then(pl.col("country_code"))
+        .otherwise(None)
+        .alias("_region_country_code"),
+        pl.when(location_is_confident)
+        .then(pl.col("adm1_code"))
+        .otherwise(None)
+        .alias("_region_adm1_code"),
+    ).with_columns(
+        pl.when(pl.col("_region_country_code").is_not_null())
+        .then(
+            pl.when(pl.col("_region_adm1_code").is_not_null())
+            .then(
+                pl.concat_str(
+                    ["_region_country_code", "_region_adm1_code"], separator=":"
+                )
+            )
+            .otherwise(pl.col("_region_country_code"))
+        )
+        .otherwise(pl.lit("UNKNOWN"))
+        .alias("region_id")
     )
     features = (
         prepared.group_by(
-            "window_start", "region_id", "country_code", "adm1_code", "disaster_type"
+            "window_start",
+            "region_id",
+            "_region_country_code",
+            "_region_adm1_code",
+            "disaster_type",
         )
         .agg(
             pl.len().cast(pl.Int64).alias("article_count"),
@@ -80,6 +106,22 @@ def build_features(input_path: Path, output_path: Path) -> FeatureStats:
             .cast(pl.Int64)
             .alias("high_confidence_story_count"),
             pl.col("tone").mean().alias("average_tone"),
+            pl.col("_location_selection_status")
+            .is_in(CONFIDENT_LOCATION_STATUSES)
+            .sum()
+            .cast(pl.Int64)
+            .alias("location_confident_article_count"),
+            pl.col("_location_selection_status")
+            .is_in(REVIEW_LOCATION_STATUSES)
+            .sum()
+            .cast(pl.Int64)
+            .alias("location_review_article_count"),
+        )
+        .rename(
+            {
+                "_region_country_code": "country_code",
+                "_region_adm1_code": "adm1_code",
+            }
         )
         .with_columns(
             (
