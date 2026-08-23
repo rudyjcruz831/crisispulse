@@ -1,15 +1,15 @@
 {
   "snapshot": {
-    "window_start": "2026-08-13T19:00:00",
-    "window_end": "2026-08-20T19:00:00",
-    "window_label": "Aug 13–20, 2026",
-    "updated_label": "Aug 20, 19:00 UTC",
-    "clean_articles": 13196,
-    "regions": 400,
-    "hours": 169,
-    "story_groups": 9112,
+    "window_start": "2026-08-20T19:00:00",
+    "window_end": "2026-08-21T00:00:00",
+    "window_label": "Aug 20–21, 2026",
+    "updated_label": "Aug 21, 00:00 UTC",
+    "clean_articles": 472,
+    "regions": 79,
+    "hours": 6,
+    "story_groups": 353,
     "candidates": 0,
-    "scored_rows": 67600
+    "scored_rows": 474
   },
   "parameters": {
     "lookback_hours": 720,
@@ -20,35 +20,43 @@
     "minimum_story_increase": 3
   },
   "status_counts": {
-    "insufficient_history": 67200,
-    "below_minimum_support": 398,
-    "normal": 2,
+    "insufficient_history": 474,
+    "below_minimum_support": 0,
+    "normal": 0,
     "candidate_anomaly": 0
   },
-  "signals": [
-    {
-      "region": "Hawaii, United States",
-      "code": "US:USHI",
-      "window_start": "2026-08-20T19:00:00",
-      "stories": 5,
-      "domains": 5,
-      "baseline": 4.0,
-      "score": 0.22,
-      "status": "normal",
-      "status_label": "Normal",
-      "evidence": []
+  "signals": [],
+  "forecast": {
+    "target": {
+      "name": "media_spread_6h",
+      "horizon_hours": 6,
+      "domain_threshold": 20,
+      "definition": "At least 20 independent source domains in any single hour during the next 6 completed hours."
     },
-    {
-      "region": "Unknown region",
-      "code": "UNKNOWN",
-      "window_start": "2026-08-20T19:00:00",
-      "stories": 6,
-      "domains": 6,
-      "baseline": 15.5,
-      "score": -1.83,
-      "status": "normal",
-      "status_label": "Normal",
-      "evidence": []
+    "eligible_windows": 0,
+    "positive_outcomes": 0,
+    "evaluation_ready_windows": 0,
+    "candidate_predictions": 0,
+    "evaluated_predictions": 0,
+    "pending_predictions": [],
+    "precision": null,
+    "recall": null,
+    "model": {
+      "status": "unavailable",
+      "type": "logistic_regression",
+      "decision_threshold": null,
+      "scores_are_calibrated_probabilities": false,
+      "training_rows": 0,
+      "validation_rows": 0,
+      "test_rows": 0,
+      "test_positives": 0,
+      "validation_hours": 0,
+      "test_hours": 0,
+      "validation_metrics": {},
+      "test_metrics": {},
+      "test_window": {},
+      "pending_predictions": [],
+      "guardrails": []
     }
-  ]
+  }
 }

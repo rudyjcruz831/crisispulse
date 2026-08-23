@@ -23,11 +23,25 @@ try {
         --report data/features/hourly_region_anomaly_report.json
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+    & $Python -m pipelines.build_outcomes `
+        --input data/features/hourly_region_anomalies.parquet `
+        --output data/features/six_hour_outcomes.parquet `
+        --report data/features/six_hour_outcome_report.json
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+    & $Python -m pipelines.train_media_spread `
+        --input data/features/six_hour_outcomes.parquet `
+        --model data/features/media_spread_logistic.json `
+        --report data/features/media_spread_model_report.json
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
     & $Python -m pipelines.export_dashboard `
         --clean data/clean/flood_articles_batch.parquet `
         --features data/history/hourly_region_features.parquet `
         --anomalies data/features/hourly_region_anomalies.parquet `
         --anomaly-report data/features/hourly_region_anomaly_report.json `
+        --outcome-report data/features/six_hour_outcome_report.json `
+        --model-report data/features/media_spread_model_report.json `
         --output $DashboardOutput
     $ExitCode = $LASTEXITCODE
 }

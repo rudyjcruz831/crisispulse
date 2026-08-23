@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -26,6 +27,32 @@ func TestLatestGKGURL(t *testing.T) {
 	want := "https://example.test/20260819120000.gkg.csv.zip"
 	if got != want {
 		t.Fatalf("latestGKGURL() = %q, want %q", got, want)
+	}
+}
+
+func TestLatestAvailableGKGURLBacktracksPastAdvertised404(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/20260819120000.gkg.csv.zip" {
+			writer.WriteHeader(http.StatusNotFound)
+			return
+		}
+		writer.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client := &http.Client{Timeout: time.Second}
+	got, err := latestAvailableGKGURL(
+		context.Background(),
+		client,
+		server.URL+"/20260819120000.gkg.csv.zip",
+		3,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := server.URL + "/20260819114500.gkg.csv.zip"
+	if got != want {
+		t.Fatalf("latestAvailableGKGURL() = %q, want %q", got, want)
 	}
 }
 
@@ -77,9 +104,9 @@ func TestGKGWindowURLsReturnsOldestToNewest(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
-		"http://data.gdeltproject.org/gdeltv2/20260820141500.gkg.csv.zip",
-		"http://data.gdeltproject.org/gdeltv2/20260820143000.gkg.csv.zip",
-		"http://data.gdeltproject.org/gdeltv2/20260820144500.gkg.csv.zip",
+		"https://data.gdeltproject.org/gdeltv2/20260820141500.gkg.csv.zip",
+		"https://data.gdeltproject.org/gdeltv2/20260820143000.gkg.csv.zip",
+		"https://data.gdeltproject.org/gdeltv2/20260820144500.gkg.csv.zip",
 	}
 	if len(urls) != len(want) {
 		t.Fatalf("got %d URLs, want %d", len(urls), len(want))
@@ -92,7 +119,7 @@ func TestGKGWindowURLsReturnsOldestToNewest(t *testing.T) {
 }
 
 func TestGKGWindowURLsSupportsSevenDaysAndRejectsMore(t *testing.T) {
-	latest := "http://data.gdeltproject.org/gdeltv2/20260820144500.gkg.csv.zip"
+	latest := "https://data.gdeltproject.org/gdeltv2/20260820144500.gkg.csv.zip"
 	urls, err := gkgWindowURLs(latest, maxIntervals)
 	if err != nil {
 		t.Fatal(err)
@@ -105,5 +132,42 @@ func TestGKGWindowURLsSupportsSevenDaysAndRejectsMore(t *testing.T) {
 	}
 	if _, err := gkgWindowURLs(latest, maxIntervals+1); err == nil {
 		t.Fatal("expected an error above the seven-day limit")
+	}
+}
+
+func TestValidatedRemoteURLRejectsUnsafeSchemesAndCredentials(t *testing.T) {
+	for _, raw := range []string{
+		"file:///etc/passwd",
+		"http://example.test/file.gkg.csv.zip",
+		"https://user:password@example.test/file.gkg.csv.zip",
+	} {
+		if _, err := validatedRemoteURL(raw); err == nil {
+			t.Fatalf("validatedRemoteURL(%q) unexpectedly succeeded", raw)
+		}
+	}
+	parsed, err := validatedRemoteURL("http://data.gdeltproject.org/gdeltv2/file.gkg.csv.zip")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Scheme != "https" {
+		t.Fatalf("GDELT URL scheme = %q", parsed.Scheme)
+	}
+}
+
+func TestDownloadRejectsOversizedResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Length", fmt.Sprint(maxGKGBytes+1))
+		writer.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	_, _, err := download(
+		context.Background(),
+		&http.Client{Timeout: time.Second},
+		server.URL+"/20260819120000.gkg.csv.zip",
+		t.TempDir(),
+	)
+	if err == nil {
+		t.Fatal("expected oversized download to be rejected")
 	}
 }

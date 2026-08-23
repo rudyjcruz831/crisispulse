@@ -11,12 +11,16 @@ from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from urllib.error import HTTPError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 
-DEFAULT_INDEX_URL = "http://data.gdeltproject.org/gdeltv2/lastupdate.txt"
+DEFAULT_INDEX_URL = "https://data.gdeltproject.org/gdeltv2/lastupdate.txt"
 MAX_INTERVALS = 7 * 24 * 4
+MAX_INDEX_BYTES = 1024 * 1024
+MAX_GKG_BYTES = 64 * 1024 * 1024
+MAX_AVAILABILITY_BACKTRACK = 16
 GKG_SUFFIX = ".gkg.csv.zip"
 USER_AGENT = "CrisisPulse/0.1 (+local research pipeline)"
 
@@ -32,23 +36,48 @@ class DownloadResult:
     local_path: str
 
 
+def _validated_remote_url(value: str) -> str:
+    parsed = urlparse(value)
+    try:
+        hostname = (parsed.hostname or "").lower()
+    except ValueError as error:
+        raise ValueError(f"invalid remote URL: {value!r}") from error
+    if not hostname or parsed.username is not None or parsed.password is not None:
+        raise ValueError(f"invalid remote URL: {value!r}")
+    if parsed.fragment:
+        raise ValueError("remote URLs must not contain fragments")
+    if parsed.scheme == "http" and hostname == "data.gdeltproject.org":
+        parsed = parsed._replace(scheme="https")
+    elif parsed.scheme == "https":
+        pass
+    elif parsed.scheme == "http" and hostname in {"127.0.0.1", "localhost", "::1"}:
+        pass
+    else:
+        raise ValueError("remote URLs must use HTTPS")
+    return parsed.geturl()
+
+
 def latest_gkg_url(index_url: str, timeout: float = 30) -> str:
+    index_url = _validated_remote_url(index_url)
     request = Request(index_url, headers={"User-Agent": USER_AGENT})
-    with urlopen(request, timeout=timeout) as response:
-        for raw_line in response:
-            fields = raw_line.decode("utf-8", errors="replace").split()
-            if fields and fields[-1].endswith(GKG_SUFFIX):
-                return fields[-1]
+    # The URL is restricted to an allowed scheme immediately before this call.
+    with urlopen(request, timeout=timeout) as response:  # nosec B310
+        _validated_remote_url(response.geturl())
+        body = response.read(MAX_INDEX_BYTES + 1)
+    if len(body) > MAX_INDEX_BYTES:
+        raise ValueError("GDELT index exceeded the size limit")
+    for raw_line in body.splitlines():
+        fields = raw_line.decode("utf-8", errors="replace").split()
+        if fields and fields[-1].endswith(GKG_SUFFIX):
+            return _validated_remote_url(fields[-1])
     raise ValueError("GDELT index did not contain a GKG ZIP URL")
 
 
 def gkg_window_urls(latest_url: str, intervals: int) -> list[str]:
     if intervals < 1 or intervals > MAX_INTERVALS:
         raise ValueError(f"intervals must be between 1 and {MAX_INTERVALS}")
-    parsed = urlparse(latest_url)
+    parsed = urlparse(_validated_remote_url(latest_url))
     filename = Path(parsed.path).name
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        raise ValueError(f"invalid GKG URL: {latest_url!r}")
     if not filename.endswith(GKG_SUFFIX):
         raise ValueError(f"unexpected GKG filename: {filename!r}")
     latest = datetime.strptime(filename.removesuffix(GKG_SUFFIX), "%Y%m%d%H%M%S")
@@ -61,6 +90,36 @@ def gkg_window_urls(latest_url: str, intervals: int) -> list[str]:
     ]
 
 
+def latest_available_gkg_url(
+    latest_url: str,
+    timeout: float = 30,
+    max_backtrack: int = MAX_AVAILABILITY_BACKTRACK,
+) -> str:
+    """Return the newest advertised GKG file that is actually downloadable."""
+    if max_backtrack < 1 or max_backtrack > MAX_AVAILABILITY_BACKTRACK:
+        raise ValueError(
+            f"max_backtrack must be between 1 and {MAX_AVAILABILITY_BACKTRACK}"
+        )
+
+    candidates = reversed(gkg_window_urls(latest_url, max_backtrack))
+    for candidate in candidates:
+        request = Request(candidate, headers={"User-Agent": USER_AGENT}, method="HEAD")
+        try:
+            # Each candidate is produced from a validated remote URL.
+            with urlopen(request, timeout=timeout) as response:  # nosec B310
+                _validated_remote_url(response.geturl())
+                if response.status == 200:
+                    return candidate
+        except HTTPError as error:
+            if error.code in {404, 410}:
+                continue
+            raise
+
+    raise ValueError(
+        f"no advertised GKG file was available within the last {max_backtrack * 15} minutes"
+    )
+
+
 def _checksum(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -70,6 +129,7 @@ def _checksum(path: Path) -> str:
 
 
 def download_one(source_url: str, output_dir: Path, timeout: float = 120) -> DownloadResult:
+    source_url = _validated_remote_url(source_url)
     filename = Path(urlparse(source_url).path).name
     if not filename.endswith(GKG_SUFFIX):
         raise ValueError(f"unexpected GKG filename: {filename!r}")
@@ -100,11 +160,18 @@ def download_one(source_url: str, output_dir: Path, timeout: float = 120) -> Dow
             request = Request(source_url, headers={"User-Agent": USER_AGENT})
             digest = hashlib.sha256()
             file_size = 0
-            with urlopen(request, timeout=timeout) as response:
+            # The URL is restricted to an allowed scheme immediately before this call.
+            with urlopen(request, timeout=timeout) as response:  # nosec B310
+                _validated_remote_url(response.geturl())
+                content_length = response.headers.get("Content-Length")
+                if content_length is not None and int(content_length) > MAX_GKG_BYTES:
+                    raise ValueError("GKG download exceeded the size limit")
                 while chunk := response.read(1024 * 1024):
                     temporary.write(chunk)
                     digest.update(chunk)
                     file_size += len(chunk)
+                    if file_size > MAX_GKG_BYTES:
+                        raise ValueError("GKG download exceeded the size limit")
         os.replace(temporary_path, destination)
         temporary_path = None
         return DownloadResult(
@@ -194,7 +261,11 @@ def main() -> None:
     parser.add_argument("--progress-every", type=int, default=25)
     args = parser.parse_args()
 
-    latest_url = args.source_url or latest_gkg_url(args.index_url, args.timeout)
+    if args.source_url:
+        latest_url = args.source_url
+    else:
+        advertised_url = latest_gkg_url(args.index_url, args.timeout)
+        latest_url = latest_available_gkg_url(advertised_url, args.timeout)
     source_urls = gkg_window_urls(latest_url, args.intervals)
     result = download_window(
         source_urls,

@@ -2,8 +2,8 @@ param(
     [string]$RawDir = "$env:USERPROFILE\.crisispulse\raw",
     [ValidateRange(1, 672)]
     [int]$WindowIntervals = 8,
-    [ValidateRange(8, 10000)]
-    [int]$RetentionFiles = 672,
+    [ValidateRange(1, 1099511627776)]
+    [long]$RetentionBytes = 10000000000,
     [ValidateRange(1, 16)]
     [int]$Workers = 8,
     [string]$DashboardOutput = "$env:USERPROFILE\.crisispulse\dashboard.json",
@@ -11,10 +11,6 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-
-if ($RetentionFiles -lt $WindowIntervals) {
-    throw "RetentionFiles must be at least WindowIntervals."
-}
 
 $RepositoryRoot = Split-Path -Parent $PSScriptRoot
 $Python = Join-Path $RepositoryRoot ".venv\Scripts\python.exe"
@@ -130,18 +126,24 @@ try {
         -DashboardOutput $DashboardOutput
     if ($LASTEXITCODE -ne 0) { throw "history update failed with exit code $LASTEXITCODE" }
 
-    $PrunableFiles = @(
+    $RetentionCandidates = @(
         Get-ChildItem -LiteralPath $RawDir -File -Filter "*.gkg.csv.zip" |
-            Sort-Object Name -Descending |
-            Select-Object -Skip $RetentionFiles
+            Sort-Object Name
     )
+    [long]$RetainedBytes = ($RetentionCandidates | Measure-Object -Property Length -Sum).Sum
+    [int]$RetainedFiles = $RetentionCandidates.Count
+    $PrunableFiles = @()
+    foreach ($RetentionCandidate in $RetentionCandidates) {
+        if ($RetainedBytes -le $RetentionBytes) { break }
+        if ($RetainedFiles -le $WindowIntervals) { break }
+        $PrunableFiles += $RetentionCandidate
+        $RetainedBytes -= $RetentionCandidate.Length
+        $RetainedFiles--
+    }
     foreach ($PrunableFile in $PrunableFiles) {
         Remove-Item -LiteralPath $PrunableFile.FullName -Force
     }
 
-    $RetainedFiles = @(
-        Get-ChildItem -LiteralPath $RawDir -File -Filter "*.gkg.csv.zip"
-    ).Count
     Write-RefreshStatus -Status "success" -Message "refresh completed" -Details @{
         downloaded_files = $DownloadSummary.downloaded_files
         already_present_files = $DownloadSummary.already_present_files
@@ -149,6 +151,9 @@ try {
         last_file = $DownloadSummary.last_file
         processed_files = $ProcessingFiles.Count
         retained_raw_files = $RetainedFiles
+        retained_raw_bytes = $RetainedBytes
+        raw_storage_limit_bytes = $RetentionBytes
+        raw_storage_used_percent = [math]::Round(($RetainedBytes / $RetentionBytes) * 100, 2)
         pruned_raw_files = $PrunableFiles.Count
         dashboard_output = $DashboardOutput
     }

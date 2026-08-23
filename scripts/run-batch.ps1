@@ -1,6 +1,7 @@
 param(
     [string]$InputDir = "data/raw",
-    [string]$Pattern = "*.gkg.csv.zip"
+    [string]$Pattern = "*.gkg.csv.zip",
+    [string]$TitleCache = "$env:USERPROFILE\.crisispulse\publisher-title-cache.json"
 )
 
 $ErrorActionPreference = "Stop"
@@ -15,7 +16,8 @@ if (-not (Test-Path -LiteralPath $Python)) {
     --pattern $Pattern `
     --output data/clean/flood_articles_batch.parquet `
     --disaster flood `
-    --minimum-strength weak
+    --minimum-strength weak `
+    --title-cache $TitleCache
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 & $Python -m pipelines.inspect_clean `

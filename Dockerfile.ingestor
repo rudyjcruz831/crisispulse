@@ -1,4 +1,4 @@
-FROM golang:1.23-alpine AS builder
+FROM golang:1.27.0-alpine AS builder
 
 WORKDIR /src
 COPY go.mod ./
@@ -6,8 +6,11 @@ COPY cmd/ingestor ./cmd/ingestor
 RUN go test ./...
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/ingestor ./cmd/ingestor
 
-FROM alpine:3.21
+FROM alpine:3.23
 RUN apk add --no-cache ca-certificates
 WORKDIR /app
 COPY --from=builder /out/ingestor /usr/local/bin/ingestor
+RUN addgroup -S -g 10001 crisispulse && \
+    adduser -S -D -H -u 10001 -G crisispulse crisispulse
+USER crisispulse
 ENTRYPOINT ["ingestor"]

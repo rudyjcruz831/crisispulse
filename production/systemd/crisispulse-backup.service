@@ -1,0 +1,10 @@
+[Unit]
+Description=Back up CrisisPulse state and derived history
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/crisispulse
+ExecStart=/usr/bin/docker compose --env-file .env.production -f compose.production.yml --profile maintenance run --rm backup
+TimeoutStartSec=30min

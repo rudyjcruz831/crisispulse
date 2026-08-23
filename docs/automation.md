@@ -5,12 +5,13 @@ The local refresh workflow keeps CrisisPulse current without Docker, a cloud acc
 ## What one refresh does
 
 1. Acquires an exclusive lock. If an earlier refresh still runs, the new invocation exits successfully without overlap.
-2. Downloads the newest eight GDELT GKG files into `%USERPROFILE%\.crisispulse\raw` using checksums, temporary files, and idempotent destinations.
+2. Confirms which advertised GDELT GKG file is actually available, safely backtracking past temporary 404s when the index is ahead of storage, then downloads the newest eight-file window into `%USERPROFILE%\.crisispulse\raw` using checksums, temporary files, and idempotent destinations.
 3. Starts at the first hour boundary inside that overlap, then processes the remaining files through cleaning, review sampling, regional/hourly features, and the anomaly scorer. This avoids treating a cut-off leading hour as complete.
 4. Merges feature rows into compact history by hour and disaster type, replacing each refreshed hour as one partition so regional rows that disappear are not left stale.
 5. Re-scores the accumulated history and atomically writes `%USERPROFILE%\.crisispulse\dashboard.json` for the Go API.
-6. Keeps the newest 672 raw ZIPs and removes older ZIPs, capping normal retention at seven days.
-7. Writes the outcome to `%USERPROFILE%\.crisispulse\refresh-status.json`.
+6. In the Docker production workflow, upserts all current flood-matched articles into a permanent compressed Parquet archive and verifies the new archive before continuing.
+7. Keeps raw ZIPs within a 10,000,000,000-byte (10 GB) budget and removes the oldest files first. The newest refresh window is always protected, and a failed archive verification prevents all pruning.
+8. Writes the outcome to `refresh-status.json`, including permanent-archive rows and bytes.
 
 The two-hour overlap is deliberate: it lets a partial current hour be replaced by a complete hour on a later run without double-counting.
 
@@ -28,7 +29,7 @@ Inspect the local status:
 Get-Content "$env:USERPROFILE\.crisispulse\refresh-status.json"
 ```
 
-A successful status includes the first and last source filenames, the count of downloaded versus already-present files, the count processed from the first safe hour boundary, retained raw-file count, and any files pruned by retention.
+A successful production status includes the first and last source filenames, the count of downloaded versus already-present files, the count processed from the first safe hour boundary, permanent article rows and bytes, retained raw-file count and bytes, the configured storage limit, and any files pruned by retention.
 
 ## Enable the 15-minute task
 
@@ -48,11 +49,15 @@ powershell -ExecutionPolicy Bypass -File .\scripts\uninstall-refresh-task.ps1
 
 Removing the task stops future scheduled runs but does not delete raw data, compact history, dashboard data, or status records.
 
+## Linux production timer
+
+The optional single-server package uses the same 15-minute overlap and retention rules through `pipelines.run_refresh`. It runs as a one-shot container with an advisory state lock and atomic status/dashboard writes. A systemd timer invokes the container every 15 minutes with `Persistent=true`, so a missed run is started after the server returns. See [the production deployment guide](production-deployment.md) for installation and backup timers.
+
 ## Storage and failure behavior
 
-- Raw ZIPs live outside OneDrive by default and are limited to 672 files.
-- Compact Parquet history remains under `data/history` and is ignored by Git.
+- Raw ZIPs live outside OneDrive by default and use a 10 GB oldest-first storage budget.
+- Permanent article and compact feature Parquet history remain under `data/history`, are compressed, and are ignored by Git.
 - Raw ZIPs, the live dashboard JSON, and refresh status remain under `%USERPROFILE%\.crisispulse`, outside OneDrive.
 - Temporary two-hour input copies are removed whether the run succeeds or fails.
-- Raw retention pruning occurs only after processing and dashboard export succeed.
+- Raw retention pruning occurs only after article archival is verified and the remaining processing and dashboard export succeed. It never removes the newest processing window.
 - Failures remain visible in the status file, while `last_success_at` preserves the most recent successful cycle.

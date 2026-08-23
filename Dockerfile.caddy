@@ -1,0 +1,23 @@
+FROM golang:1.27.0-alpine AS builder
+
+WORKDIR /src
+COPY production/caddy/go.mod ./go.mod
+RUN go mod download
+RUN CGO_ENABLED=0 go build -mod=mod -trimpath -ldflags="-s -w" -o /out/caddy github.com/caddyserver/caddy/v2/cmd/caddy
+
+FROM alpine:3.23
+
+RUN apk add --no-cache ca-certificates && \
+    addgroup -S -g 10001 caddy && \
+    adduser -S -D -H -u 10001 -s /sbin/nologin -G caddy caddy && \
+    mkdir -p /config /data /etc/caddy && \
+    chown -R caddy:caddy /config /data /etc/caddy
+COPY --from=builder /out/caddy /usr/local/bin/caddy
+
+ENV XDG_CONFIG_HOME=/config \
+    XDG_DATA_HOME=/data
+
+USER caddy
+EXPOSE 80 443
+ENTRYPOINT ["caddy"]
+CMD ["run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
