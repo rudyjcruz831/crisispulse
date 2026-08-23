@@ -1,0 +1,9 @@
+FROM gcr.io/distroless/python3-debian13:nonroot
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /opt/crisispulse
+COPY --chown=nonroot:nonroot production/health_monitor.py ./health_monitor.py
+USER nonroot
+ENTRYPOINT ["/usr/bin/python3", "/opt/crisispulse/health_monitor.py"]

@@ -10,12 +10,12 @@ The current version costs **$0** to run: it uses local Python, DuckDB, Parquet, 
 - Consecutive-window ingestion for up to 672 fifteen-minute files (seven days).
 - An immutable raw-file layout with SHA-256 checksums and a JSON Lines manifest.
 - A Python cleaner for official GKG ZIP/TSV files and compact headered samples.
-- High/weak flood and wildfire theme classification (the sample run uses high-confidence floods).
+- High/weak flood and wildfire theme classification, with URL-headline mismatch checks that prevent clearly unrelated stories from creating alerts.
 - URL canonicalization, source-domain extraction, exact deduplication, and location parsing.
 - Explicit `single`, `dominant`, `ambiguous`, `unresolved`, or `missing` regional selection status.
 - Quality flags that preserve questionable records instead of silently deleting them.
 - Compressed Parquet output and DuckDB hourly counts.
-- Conservative cross-domain syndicated-story grouping using URL slugs and six-hour windows.
+- Conservative cross-domain syndicated-story grouping using title-like URL slugs (including URLs ending in numeric IDs) and six-hour windows.
 - A repeatable JSON quality report for evaluating real GKG files.
 - Duplicate-adjusted ADM1/hour features with source diversity and velocity.
 - A readable JSON feature report for inspecting the strongest regional signals.
@@ -24,10 +24,16 @@ The current version costs **$0** to run: it uses local Python, DuckDB, Parquet, 
 - Conservative rolling median/MAD anomaly candidates with a seven-day history gate.
 - A local React evidence dashboard generated from the latest pipeline outputs.
 - A local Go API for health, complete snapshot, and supported-signal responses.
-- A safe local 15-minute refresh workflow with locking, seven-day raw retention, and run status.
+- A safe local 15-minute refresh workflow with locking, a 10 GB oldest-first raw cache, and run status.
+- A permanent zstd-compressed article archive that is verified before any raw ZIP is eligible for rotation.
 - A local human-review queue with persistent real-event, irrelevant-news, and uncertain labels.
 - Direct publisher evidence grouped into distinct stories for each review candidate.
-- Thirty Python tests, twelve Go tests, and two dashboard rendering tests.
+- Review-quality progress, guarded label rates, and a downloadable CSV dataset.
+- A six-hour media-spread outcome with future-only labels and open forecast clocks.
+- A leakage-controlled chronological logistic benchmark with a six-hour split embargo.
+- A read-only local admin console for refresh health, forecasts, review progress, and pilot readiness.
+- A local-only single-server production package with HTTPS, pilot login, Linux refresh scheduling, monitoring, backup, and guarded restore.
+- Automated Python, Go, and dashboard rendering tests.
 
 ## Quick start on Windows
 
@@ -65,6 +71,8 @@ Docker can run the sample cleaner without a local Python setup:
 docker compose run --rm pipeline
 docker compose run --rm pipeline python -m pipelines.hourly_counts --input data/clean/flood_articles.parquet
 ```
+
+The separate production package remains free while tested on this computer. It does not activate hosting or create a paid account. See [the single-server deployment guide](docs/production-deployment.md).
 
 The Dockerized Go build runs its unit tests before producing the ingestor binary, so Go does not need to be installed on the host.
 
@@ -160,7 +168,7 @@ npm install
 npm run dev
 ```
 
-The dashboard shows current candidate counts, supported regional evidence, scoring readiness, alert guardrails, and a human-review queue. Each candidate includes bounded, direct publisher links grouped by GDELT story identity; the interface clearly distinguishes URL-derived labels from verified headlines. Candidate decisions are appended to `%USERPROFILE%\.crisispulse\reviews.jsonl` and can be changed without losing the earlier audit entries. It connects to the Go API when available and visibly falls back to the last verified snapshot when the API is stopped. It requires no paid API and never presents an unusual news pattern as a verified disaster.
+The dashboard shows current candidate counts, supported regional evidence, scoring readiness, alert guardrails, a human-review queue, progress toward a measurable review sample, and the Forecast Lab. Forecast Lab locks a candidate's target to the next six completed hours, keeps future observations hidden until maturity, and reports an early chronological model benchmark on later holdout hours that were not used for fitting or threshold selection. Model values are labeled as ranking scores—not calibrated probabilities—and the target is news-domain spread rather than physical disaster occurrence. Each candidate includes bounded, direct publisher links grouped by GDELT story identity. For the small set of stories actually displayed, the refresh politely reads a publisher's public Open Graph, social, or HTML title and stores it in a local cache; blocked, unsafe, slow, or unavailable pages keep the URL-derived fallback. Candidate decisions are appended to `%USERPROFILE%\.crisispulse\reviews.jsonl` and can be changed without losing the earlier audit entries. Review rates remain hidden until at least 20 real-event or irrelevant-news decisions exist, and the latest label for each signal can be downloaded as CSV. It connects to the Go API when available and visibly falls back to the last verified snapshot when the API is stopped. It requires no paid API and never presents an unusual news pattern as a verified disaster.
 
 Run the complete Python, Go, and dashboard test suite with:
 
@@ -176,7 +184,7 @@ Run one incremental refresh manually before scheduling it:
 powershell -ExecutionPolicy Bypass -File .\scripts\run-refresh.ps1
 ```
 
-The refresh downloads the newest two-hour overlap, processes from the first safe hour boundary, merges it into compact history, refreshes anomaly scores, and writes the live API snapshot to `%USERPROFILE%\.crisispulse\dashboard.json`. Raw ZIP retention is capped at 672 files (seven days) outside OneDrive. Concurrent runs are skipped, and the latest outcome is recorded at `%USERPROFILE%\.crisispulse\refresh-status.json`.
+The refresh downloads the newest two-hour overlap, processes from the first safe hour boundary, merges it into compact history, refreshes anomaly scores, and writes the live API snapshot to `%USERPROFILE%\.crisispulse\dashboard.json`. Publisher titles are cached in `%USERPROFILE%\.crisispulse\publisher-title-cache.json`; successful titles are reused for 30 days and failed lookups wait six hours before retrying. The Docker production refresh also upserts every unique flood-matched article into `data/history/flood_articles_archive.parquet` using zstd compression and verifies the temporary Parquet file before replacing the archive. Raw ZIP retention uses a 10,000,000,000-byte (10 GB) budget and removes the oldest file only after archival and the rest of the refresh succeed. Based on measured GDELT file sizes, this normally retains roughly three weeks, but the exact duration varies. Concurrent runs are skipped, and the latest outcome is recorded in `refresh-status.json`.
 
 After a successful manual run, the optional Windows task can run it every 15 minutes:
 
@@ -197,7 +205,7 @@ data/raw/                  Immutable downloads (ignored by Git)
 %USERPROFILE%/.crisispulse/raw/  Default seven-day cache outside OneDrive
 data/clean/                Generated Parquet files (ignored by Git)
 data/review/               Generated human-labeling CSV files (ignored by Git)
-data/history/              Compact accumulated feature history (ignored by Git)
+data/history/              Permanent article archive and compact feature history (ignored by Git)
 dashboard/                 Local React evidence dashboard
 tests/                     Python unit and pipeline tests
 scripts/                   Windows setup, run, and test commands
@@ -208,20 +216,22 @@ docs/data-dictionary.md    Clean Parquet field definitions
 ## Important limitations
 
 - GDELT measures news reporting, not physical hazard sensors.
-- The high-confidence flood rule removes the weakest theme matches, but GDELT themes can still reflect metaphorical or background references.
+- The high-confidence flood rule removes weak theme matches and downgrades clear URL-headline conflicts. Opaque URLs and subtle context still require human review.
 - The URL-slug grouping catches obvious syndicated copies but is only an estimate, not content-level deduplication.
 - `seen_at` is when GDELT processed a record, not necessarily when the source article was published.
 - Location selection is a transparent starter heuristic, not a full geocoder. Tied multi-region articles are routed to `UNKNOWN` until reviewed.
 - ADM1 region IDs use GDELT/FIPS-style country and administrative codes, not guaranteed ISO codes.
 - Seven days opens the first eligible scoring hour but is not yet enough to evaluate candidate stability over time.
 - An anomaly candidate measures unusual news reporting, not proof of a physical disaster.
+- The first media-spread model has only a roughly one-day later holdout; its results are an engineering benchmark, not production validation.
+- Class-balanced model scores are ranking values and must not be presented as probabilities.
 
 ### First live validation
 
 The cleaner has been exercised against a current 15-minute GKG update. That run exposed and fixed the live nine-field `V2ENHANCEDLOCATIONS` layout (including ADM2), and showed that `NATURAL_DISASTER_FLOODED` often describes metaphorical flooding. Both cases are now covered by regression tests. Live ZIPs and generated Parquet files remain local and are excluded from Git.
 
-These constraints are deliberate. The next milestone is to label the generated review set and keep extending the compact hourly history so candidate stability can be measured across many eligible hours.
+These constraints are deliberate. The next milestone is to keep collecting untouched forward outcomes and human labels for several weeks, then rerun a preregistered temporal evaluation and calibrate the model on later data.
 
 ## Design reference
 
-See [the architecture](docs/architecture.md) for component details, [the automation guide](docs/automation.md), [the API reference](docs/api.md), [the data dictionary](docs/data-dictionary.md) for the Parquet schemas, [the first live validation](docs/live-validation-2026-08-20.md), [the multi-file validation](docs/multi-file-validation-2026-08-20.md), and [the seven-day validation](docs/seven-day-validation-2026-08-20.md).
+See [the architecture](docs/architecture.md) for component details, [the automation guide](docs/automation.md), [the API reference](docs/api.md), [the data dictionary](docs/data-dictionary.md) for the Parquet schemas, [the media-spread model card](docs/model-card-media-spread.md), [the single-server deployment guide](docs/production-deployment.md), [the first live validation](docs/live-validation-2026-08-20.md), [the multi-file validation](docs/multi-file-validation-2026-08-20.md), and [the seven-day validation](docs/seven-day-validation-2026-08-20.md).

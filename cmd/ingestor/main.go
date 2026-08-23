@@ -19,10 +19,11 @@ import (
 	"time"
 )
 
-// GDELT currently publishes this data endpoint over HTTP. The downloaded file
-// receives a SHA-256 checksum in the local manifest for reproducible processing.
-const defaultIndexURL = "http://data.gdeltproject.org/gdeltv2/lastupdate.txt"
+const defaultIndexURL = "https://data.gdeltproject.org/gdeltv2/lastupdate.txt"
 const maxIntervals = 7 * 24 * 4
+const maxIndexBytes = 1 << 20
+const maxGKGBytes = 64 << 20
+const maxAvailabilityBacktrack = 16
 
 type config struct {
 	indexURL  string
@@ -73,6 +74,10 @@ func run(ctx context.Context, cfg config) error {
 		if err != nil {
 			return err
 		}
+		sourceURL, err = latestAvailableGKGURL(ctx, client, sourceURL, maxAvailabilityBacktrack)
+		if err != nil {
+			return err
+		}
 	}
 
 	sourceURLs, err := gkgWindowURLs(sourceURL, cfg.intervals)
@@ -117,9 +122,9 @@ func gkgWindowURLs(latestURL string, intervals int) ([]string, error) {
 	if intervals < 1 || intervals > maxIntervals {
 		return nil, fmt.Errorf("intervals must be between 1 and %d", maxIntervals)
 	}
-	parsed, err := url.Parse(latestURL)
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return nil, fmt.Errorf("invalid GKG URL %q", latestURL)
+	parsed, err := validatedRemoteURL(latestURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid GKG URL %q: %w", latestURL, err)
 	}
 	filename := pathpkg.Base(parsed.Path)
 	const suffix = ".gkg.csv.zip"
@@ -142,7 +147,11 @@ func gkgWindowURLs(latestURL string, intervals int) ([]string, error) {
 }
 
 func latestGKGURL(ctx context.Context, client *http.Client, indexURL string) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, indexURL, nil)
+	parsedIndex, err := validatedRemoteURL(indexURL)
+	if err != nil {
+		return "", fmt.Errorf("invalid GDELT index URL: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, parsedIndex.String(), nil)
 	if err != nil {
 		return "", fmt.Errorf("create index request: %w", err)
 	}
@@ -154,8 +163,11 @@ func latestGKGURL(ctx context.Context, client *http.Client, indexURL string) (st
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("fetch GDELT index: HTTP %s", resp.Status)
 	}
+	if _, err := validatedRemoteURL(resp.Request.URL.String()); err != nil {
+		return "", fmt.Errorf("GDELT index redirected to an unsafe URL: %w", err)
+	}
 
-	scanner := bufio.NewScanner(resp.Body)
+	scanner := bufio.NewScanner(io.LimitReader(resp.Body, maxIndexBytes+1))
 	for scanner.Scan() {
 		fields := strings.Fields(scanner.Text())
 		if len(fields) == 0 {
@@ -163,7 +175,11 @@ func latestGKGURL(ctx context.Context, client *http.Client, indexURL string) (st
 		}
 		candidate := fields[len(fields)-1]
 		if strings.HasSuffix(candidate, ".gkg.csv.zip") {
-			return candidate, nil
+			parsedCandidate, err := validatedRemoteURL(candidate)
+			if err != nil {
+				return "", fmt.Errorf("GDELT index returned an unsafe URL: %w", err)
+			}
+			return parsedCandidate.String(), nil
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -172,11 +188,54 @@ func latestGKGURL(ctx context.Context, client *http.Client, indexURL string) (st
 	return "", errors.New("GDELT index did not contain a GKG ZIP URL")
 }
 
-func download(ctx context.Context, client *http.Client, sourceURL, outputDir string) (manifestEntry, bool, error) {
-	parsed, err := url.Parse(sourceURL)
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return manifestEntry{}, false, fmt.Errorf("invalid source URL %q", sourceURL)
+func latestAvailableGKGURL(
+	ctx context.Context,
+	client *http.Client,
+	latestURL string,
+	maxBacktrack int,
+) (string, error) {
+	if maxBacktrack < 1 || maxBacktrack > maxAvailabilityBacktrack {
+		return "", fmt.Errorf("max backtrack must be between 1 and %d", maxAvailabilityBacktrack)
 	}
+	candidates, err := gkgWindowURLs(latestURL, maxBacktrack)
+	if err != nil {
+		return "", err
+	}
+	for index := len(candidates) - 1; index >= 0; index-- {
+		candidate := candidates[index]
+		req, err := http.NewRequestWithContext(ctx, http.MethodHead, candidate, nil)
+		if err != nil {
+			return "", fmt.Errorf("create GKG availability request: %w", err)
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			return "", fmt.Errorf("check GKG availability: %w", err)
+		}
+		resp.Body.Close()
+		if _, err := validatedRemoteURL(resp.Request.URL.String()); err != nil {
+			return "", fmt.Errorf("GKG availability check redirected to an unsafe URL: %w", err)
+		}
+		switch resp.StatusCode {
+		case http.StatusOK:
+			return candidate, nil
+		case http.StatusNotFound, http.StatusGone:
+			continue
+		default:
+			return "", fmt.Errorf("check GKG availability: HTTP %s", resp.Status)
+		}
+	}
+	return "", fmt.Errorf(
+		"no advertised GKG file was available within the last %d minutes",
+		maxBacktrack*15,
+	)
+}
+
+func download(ctx context.Context, client *http.Client, sourceURL, outputDir string) (manifestEntry, bool, error) {
+	parsed, err := validatedRemoteURL(sourceURL)
+	if err != nil {
+		return manifestEntry{}, false, fmt.Errorf("invalid source URL %q: %w", sourceURL, err)
+	}
+	sourceURL = parsed.String()
 	filename := filepath.Base(parsed.Path)
 	if filename == "." || filename == string(filepath.Separator) || filename == "" {
 		return manifestEntry{}, false, fmt.Errorf("source URL has no filename: %q", sourceURL)
@@ -208,6 +267,12 @@ func download(ctx context.Context, client *http.Client, sourceURL, outputDir str
 	if resp.StatusCode != http.StatusOK {
 		return manifestEntry{}, false, fmt.Errorf("download GKG file: HTTP %s", resp.Status)
 	}
+	if _, err := validatedRemoteURL(resp.Request.URL.String()); err != nil {
+		return manifestEntry{}, false, fmt.Errorf("download redirected to an unsafe URL: %w", err)
+	}
+	if resp.ContentLength > maxGKGBytes {
+		return manifestEntry{}, false, fmt.Errorf("download exceeds %d bytes", maxGKGBytes)
+	}
 
 	temporary, err := os.CreateTemp(outputDir, filename+".*.partial")
 	if err != nil {
@@ -217,7 +282,10 @@ func download(ctx context.Context, client *http.Client, sourceURL, outputDir str
 	defer os.Remove(temporaryName)
 
 	hash := sha256.New()
-	written, copyErr := io.Copy(io.MultiWriter(temporary, hash), resp.Body)
+	written, copyErr := io.Copy(
+		io.MultiWriter(temporary, hash),
+		io.LimitReader(resp.Body, maxGKGBytes+1),
+	)
 	closeErr := temporary.Close()
 	if copyErr != nil {
 		return manifestEntry{}, false, fmt.Errorf("write download: %w", copyErr)
@@ -225,12 +293,39 @@ func download(ctx context.Context, client *http.Client, sourceURL, outputDir str
 	if closeErr != nil {
 		return manifestEntry{}, false, fmt.Errorf("close download: %w", closeErr)
 	}
+	if written > maxGKGBytes {
+		return manifestEntry{}, false, fmt.Errorf("download exceeds %d bytes", maxGKGBytes)
+	}
 	if err := os.Rename(temporaryName, destination); err != nil {
 		return manifestEntry{}, false, fmt.Errorf("finalize download: %w", err)
 	}
 
 	checksum := hex.EncodeToString(hash.Sum(nil))
 	return newManifestEntry(sourceURL, destination, checksum, written, "downloaded"), false, nil
+}
+
+func validatedRemoteURL(raw string) (*url.URL, error) {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Host == "" || parsed.Hostname() == "" {
+		return nil, errors.New("URL must include a host")
+	}
+	if parsed.User != nil {
+		return nil, errors.New("URL credentials are not allowed")
+	}
+	if parsed.Fragment != "" {
+		return nil, errors.New("URL fragments are not allowed")
+	}
+	hostname := strings.ToLower(parsed.Hostname())
+	if parsed.Scheme == "http" && hostname == "data.gdeltproject.org" {
+		parsed.Scheme = "https"
+	}
+	if parsed.Scheme == "https" {
+		return parsed, nil
+	}
+	if parsed.Scheme == "http" && (hostname == "127.0.0.1" || hostname == "localhost" || hostname == "::1") {
+		return parsed, nil
+	}
+	return nil, errors.New("URL must use HTTPS")
 }
 
 func checksumFile(path string) (string, error) {

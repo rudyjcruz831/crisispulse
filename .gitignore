@@ -1,8 +1,10 @@
 .env
+.env.production
 .venv/
 __pycache__/
 .pytest_cache/
 *.py[cod]
+publisher-title-cache.json
 
 data/raw/*
 !data/raw/.gitkeep
@@ -12,3 +14,4 @@ data/features/*
 !data/features/.gitkeep
 data/review/*
 data/history/*
+backups/*

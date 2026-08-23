@@ -22,6 +22,9 @@ The starter writes one row per unique canonical article URL. GDELT processing ti
 | `disaster_type` | string | Disaster filter used for this run, currently `flood` or `wildfire`. |
 | `disaster_match_strength` | string | `high` for explicit event themes or `weak` for ambiguous theme-only evidence. |
 | `matched_disaster_themes` | list[string] | Theme tokens that caused the disaster classification. |
+| `url_topic_relevance` | string | `supporting`, `mismatch`, or `unknown` comparison between a readable URL headline and the selected disaster topic. A mismatch downgrades a high GDELT theme to weak. |
+| `publisher_title` | string/null | Bounded title read from permitted publisher metadata or HTML; null when unavailable. |
+| `publisher_title_relevance` | string | `supporting`, `mismatch`, or `unknown` comparison between the publisher title and the selected disaster topic. A mismatch downgrades a high match to weak. |
 | `themes` | list[string] | Unique normalized GKG theme tokens found on the record. |
 | `tone` | float/null | First value from GDELT's tone field. It is weak evidence, not a severity measurement. |
 | `geo_confidence` | string | `coordinates_valid`, `location_only`, or `missing`. |
@@ -31,6 +34,10 @@ The starter writes one row per unique canonical article URL. GDELT processing ti
 | `duplicate_group_size` | integer | Number of clean article URLs assigned to the group. |
 
 Current quality flags are `invalid_url`, `invalid_seen_at`, `missing_location`, `invalid_coordinates`, `multiple_locations`, `ambiguous_region`, and `unresolved_region`.
+
+## Permanent article archive
+
+`flood_articles_archive.parquet` uses the same columns above and is keyed by `article_id`. Each production refresh upserts the current cleaned batch, preferring the latest checked version of a repeated article. The file uses zstd compression and is atomically replaced only after a read-back check proves that every current article ID is present. It is retained independently of the 10 GB raw ZIP cache and included in production backups.
 
 ## Regional/hourly feature Parquet
 
@@ -89,3 +96,34 @@ The review evaluator accepts `relevant`, `not_relevant`, or `uncertain` for disa
 | `robust_z_score` | float/null | Robust standardized increase; null when history is insufficient or MAD is zero. |
 | `anomaly_status` | string | `insufficient_history`, `below_minimum_support`, `normal`, or `candidate_anomaly`. |
 | `is_candidate_anomaly` | boolean | True only after every history, story, domain, increase, and score gate passes. |
+
+## Six-hour outcome Parquet
+
+This table copies prediction-time fields from the anomaly table and adds a future-only media-spread target.
+
+| Column | Type | Meaning |
+|---|---|---|
+| `window_start` | datetime | Prediction hour; all model features stop here. |
+| `region_id` | string | Region or `UNKNOWN`. |
+| `disaster_type` | string | Disaster category. |
+| `observed_feature_row` | boolean | Whether the prediction hour contained an observed feature row. |
+| `article_count` | integer | Prediction-hour article count. |
+| `estimated_unique_story_count` | integer | Prediction-hour duplicate-adjusted story count. |
+| `high_confidence_story_count` | integer | Prediction-hour high-confidence story count. |
+| `unique_domain_count` | integer | Prediction-hour distinct source-domain count. |
+| `baseline_history_hours` | integer | Prior hours available to the anomaly baseline. |
+| `baseline_median` | float/null | Prior-only rolling median at prediction time. |
+| `baseline_mad` | float/null | Prior-only median absolute deviation at prediction time. |
+| `robust_z_score` | float/null | Prediction-time anomaly score. |
+| `anomaly_status` | string | Prediction-time anomaly status. |
+| `is_candidate_anomaly` | boolean | Whether the prediction-time anomaly gates passed. |
+| `outcome_matures_at` | datetime | End of the six-hour future observation window. |
+| `future_max_domain_count` | integer/null | Maximum domains in any one of future hours 1–6; null until complete. |
+| `label_media_spread_6h` | boolean/null | True when `future_max_domain_count >= 20`; null until complete. |
+| `outcome_complete` | boolean | Whether all six future hours are available. |
+
+The current hour never contributes to `future_max_domain_count` or the label. This prevents a candidate's triggering evidence from also satisfying its future outcome.
+
+## Dashboard evidence stories
+
+Each `latest_coverage` item and candidate `evidence` item contains a stable `story_id`, UTC `seen_at`, optional `location`, matched `themes`, and bounded publisher `sources`. The optional `title` is read from the primary publisher's Open Graph, social, or HTML metadata. It is `null` when the publisher disallows or prevents the bounded lookup; the dashboard then displays a URL-derived fallback. Titles are display metadata only and do not affect flood classification, anomaly scoring, or forecast labels.

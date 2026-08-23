@@ -1,0 +1,10 @@
+[Unit]
+Description=Back up CrisisPulse every day
+
+[Timer]
+OnCalendar=*-*-* 07:00:00 UTC
+Persistent=true
+RandomizedDelaySec=10min
+
+[Install]
+WantedBy=timers.target

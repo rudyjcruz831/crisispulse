@@ -28,10 +28,21 @@ def main() -> None:
     parser.add_argument(
         "--minimum-strength", choices=sorted(MATCH_STRENGTH), default="weak"
     )
+    parser.add_argument(
+        "--title-cache",
+        type=Path,
+        help="optional cache used to verify high-confidence rows with opaque URLs",
+    )
     args = parser.parse_args()
 
     inputs = find_inputs(args.input_dir, args.pattern)
-    stats = clean_files(inputs, args.output, args.disaster, args.minimum_strength)
+    stats = clean_files(
+        inputs,
+        args.output,
+        args.disaster,
+        args.minimum_strength,
+        args.title_cache,
+    )
     print(
         json.dumps(
             {

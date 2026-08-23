@@ -1,0 +1,11 @@
+[Unit]
+Description=CrisisPulse 15-minute GDELT refresh
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/crisispulse
+ExecStart=/usr/bin/docker compose --env-file .env.production -f compose.production.yml --profile maintenance run --rm refresh
+TimeoutStartSec=14min

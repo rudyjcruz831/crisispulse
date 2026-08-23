@@ -57,10 +57,12 @@ def test_hourly_features_are_duplicate_adjusted_and_include_velocity(tmp_path: P
     assert first["region_id"] == "US:USLA"
     assert first["article_count"] == 3
     assert first["estimated_unique_story_count"] == 2
+    assert first["unique_domain_count"] == 2
     assert round(first["duplicate_ratio"], 6) == round(1 / 3, 6)
     assert first["article_velocity"] is None
     assert second["high_confidence_article_count"] == 0
     assert second["weak_article_count"] == 1
+    assert second["unique_domain_count"] == 0
     assert second["article_velocity"] == -1
 
     report = build_feature_report(feature_path, top=1)

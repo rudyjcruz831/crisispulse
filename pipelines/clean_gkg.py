@@ -7,9 +7,11 @@ import csv
 import hashlib
 import io
 import json
+import re
 import sys
+import unicodedata
 import zipfile
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import datetime
@@ -18,13 +20,14 @@ from pathlib import Path
 import polars as pl
 
 from pipelines.canonicalize_urls import canonicalize_url, source_domain
-from pipelines.deduplicate import story_group
+from pipelines.deduplicate import story_group, title_like_path_segment
 from pipelines.gdelt_schema import GKG_COLUMNS
 from pipelines.parse_locations import (
     distinct_location_count,
     parse_enhanced_locations,
     select_primary_location,
 )
+from pipelines.publisher_titles import fetch_publisher_titles, read_publisher_title
 
 
 DISASTER_MARKERS = {
@@ -32,6 +35,38 @@ DISASTER_MARKERS = {
     "wildfire": ("WILDFIRE", "FOREST_FIRE", "WILD_FIRE"),
 }
 MATCH_STRENGTH = {"weak": 1, "high": 2}
+MAX_ARCHIVE_MEMBER_BYTES = 512 * 1024 * 1024
+MAX_ARCHIVE_COMPRESSION_RATIO = 250
+MAX_CSV_FIELD_BYTES = 16 * 1024 * 1024
+URL_TOPIC_PATTERNS = {
+    "flood": (
+        r"\bflood(?:s|ed|ing)?\b",
+        r"\bflash[ -]?flood",
+        r"\binundat",
+        r"\bdeluge\b",
+        r"\boverflow(?:s|ed|ing)?\b",
+        r"\bhigh[ -]?water\b",
+        r"\brising[ -]?water\b",
+        r"\bwater[ -]?rescue",
+        r"\bstorm[ -]?surge\b",
+        r"\bheavy[ -]?rain",
+        r"\btorrential[ -]?rain",
+        r"\brainfall\b",
+        r"\bmonsoon\b",
+        r"\bstormwater\b",
+        r"\bdrainage\b",
+        r"\bwaterlogged\b",
+        r"\blevee\b",
+        r"\bdyke\b|\bdike\b",
+        r"\bdam[ -]?(?:break|burst|collapse)",
+        r"\bhurricane\b|\bcyclone\b|\btyphoon\b",
+        r"\btropical[ -]?storm\b",
+        r"\bstorm(?:s)?[ -]?(?:damage|relief|recovery|preparedness)",
+        r"\binondation|\bcrue\b|\bhochwasser\b|\buberschwemm",
+        r"\benchente\b|\balagamento\b|\balluvion|\bbanjir\b",
+        r"\bpowodz\b|\bpoplava\b|\bpovoden\b",
+    ),
+}
 
 OUTPUT_SCHEMA = {
     "source_file": pl.String,
@@ -52,6 +87,9 @@ OUTPUT_SCHEMA = {
     "disaster_type": pl.String,
     "disaster_match_strength": pl.String,
     "matched_disaster_themes": pl.List(pl.String),
+    "url_topic_relevance": pl.String,
+    "publisher_title": pl.String,
+    "publisher_title_relevance": pl.String,
     "themes": pl.List(pl.String),
     "tone": pl.Float64,
     "geo_confidence": pl.String,
@@ -70,6 +108,9 @@ class PipelineStats:
     weak_rows_skipped: int = 0
     disaster_rows: int = 0
     duplicate_rows: int = 0
+    url_topic_mismatch_rows: int = 0
+    publisher_title_checked_rows: int = 0
+    publisher_title_mismatch_rows: int = 0
     location_review_rows: int = 0
     ambiguous_region_rows: int = 0
     output_rows: int = 0
@@ -133,18 +174,60 @@ def matches_disaster(
     return bool(strength and MATCH_STRENGTH[strength] >= MATCH_STRENGTH[minimum_strength])
 
 
+def url_topic_relevance(
+    canonical_url: str | None, disaster_type: str
+) -> str:
+    """Use a readable URL headline as a conservative check on GDELT themes."""
+    title_segment = title_like_path_segment(canonical_url)
+    if title_segment is None or disaster_type not in URL_TOPIC_PATTERNS:
+        return "unknown"
+    normalized = unicodedata.normalize("NFKD", title_segment)
+    normalized = "".join(char for char in normalized if not unicodedata.combining(char))
+    normalized = re.sub(r"[-_]+", " ", normalized).lower()
+    if any(re.search(pattern, normalized) for pattern in URL_TOPIC_PATTERNS[disaster_type]):
+        return "supporting"
+    return "mismatch"
+
+
+def publisher_title_relevance(title: str | None, disaster_type: str) -> str:
+    """Classify a real page title when an opaque URL cannot confirm the topic."""
+    if not title or disaster_type not in URL_TOPIC_PATTERNS:
+        return "unknown"
+    words = re.findall(r"[^\W\d_]+", title, flags=re.UNICODE)
+    if len(words) < 4 or len(title.strip()) < 20:
+        return "unknown"
+    normalized = unicodedata.normalize("NFKD", title)
+    normalized = "".join(char for char in normalized if not unicodedata.combining(char))
+    normalized = normalized.lower()
+    if any(re.search(pattern, normalized) for pattern in URL_TOPIC_PATTERNS[disaster_type]):
+        return "supporting"
+    return "mismatch"
+
+
 @contextmanager
 def _text_reader(path: Path) -> Iterator[io.TextIOBase]:
     if path.suffix.lower() == ".zip":
         with zipfile.ZipFile(path) as archive:
             members = [
-                name
-                for name in archive.namelist()
-                if name.lower().endswith((".csv", ".tsv"))
+                info
+                for info in archive.infolist()
+                if not info.is_dir()
+                and info.filename.lower().endswith((".csv", ".tsv"))
             ]
             if not members:
                 raise ValueError(f"ZIP contains no CSV or TSV file: {path}")
-            with archive.open(members[0]) as binary:
+            if len(members) != 1:
+                raise ValueError(f"ZIP must contain exactly one CSV or TSV file: {path}")
+            member = members[0]
+            if member.file_size > MAX_ARCHIVE_MEMBER_BYTES:
+                raise ValueError(f"ZIP member exceeds the size limit: {path}")
+            if (
+                member.compress_size > 0
+                and member.file_size / member.compress_size
+                > MAX_ARCHIVE_COMPRESSION_RATIO
+            ):
+                raise ValueError(f"ZIP member exceeds the compression-ratio limit: {path}")
+            with archive.open(member) as binary:
                 with io.TextIOWrapper(
                     binary, encoding="utf-8", errors="replace", newline=""
                 ) as reader:
@@ -156,7 +239,7 @@ def _text_reader(path: Path) -> Iterator[io.TextIOBase]:
 
 def iter_gkg_rows(path: Path) -> Iterator[dict[str, str]]:
     """Read official headerless GKG files and compact headered test/sample files."""
-    csv.field_size_limit(min(sys.maxsize, 2_147_483_647))
+    csv.field_size_limit(min(sys.maxsize, MAX_CSV_FIELD_BYTES))
     with _text_reader(path) as stream:
         reader = csv.reader(stream, delimiter="\t")
         first = next(reader, None)
@@ -178,8 +261,17 @@ def clean_file(
     output_path: Path,
     disaster_type: str = "flood",
     minimum_strength: str = "high",
+    title_cache_path: Path | None = None,
+    title_fetcher: Callable[[str], str | None] = read_publisher_title,
 ) -> PipelineStats:
-    return clean_files([input_path], output_path, disaster_type, minimum_strength)
+    return clean_files(
+        [input_path],
+        output_path,
+        disaster_type,
+        minimum_strength,
+        title_cache_path,
+        title_fetcher,
+    )
 
 
 def clean_files(
@@ -187,6 +279,8 @@ def clean_files(
     output_path: Path,
     disaster_type: str = "flood",
     minimum_strength: str = "high",
+    title_cache_path: Path | None = None,
+    title_fetcher: Callable[[str], str | None] = read_publisher_title,
 ) -> PipelineStats:
     if disaster_type not in DISASTER_MARKERS:
         raise ValueError(f"unsupported disaster type: {disaster_type}")
@@ -210,13 +304,18 @@ def clean_files(
             if match_strength is None:
                 continue
             stats.theme_matched_rows += 1
+
+            raw_url = row.get("V2DOCUMENTIDENTIFIER", "").strip()
+            canonical_url = canonicalize_url(raw_url)
+            topic_relevance = url_topic_relevance(canonical_url, disaster_type)
+            if match_strength == "high" and topic_relevance == "mismatch":
+                match_strength = "weak"
+                stats.url_topic_mismatch_rows += 1
             if MATCH_STRENGTH[match_strength] < MATCH_STRENGTH[minimum_strength]:
                 stats.weak_rows_skipped += 1
                 continue
             stats.disaster_rows += 1
 
-            raw_url = row.get("V2DOCUMENTIDENTIFIER", "").strip()
-            canonical_url = canonicalize_url(raw_url)
             identity_source = canonical_url or raw_url
             article_id = hashlib.sha256(identity_source.encode("utf-8")).hexdigest()
             if article_id in seen_articles:
@@ -235,12 +334,16 @@ def clean_files(
             quality_flags: list[str] = []
             if canonical_url is None:
                 quality_flags.append("invalid_url")
+            if topic_relevance == "mismatch":
+                quality_flags.append("url_topic_mismatch")
             if timestamp is None:
                 quality_flags.append("invalid_seen_at")
             if primary is None:
                 quality_flags.append("missing_location")
             elif not primary.valid_coordinates:
                 quality_flags.append("invalid_coordinates")
+            if primary and primary.name and "\ufffd" in primary.name:
+                quality_flags.append("text_encoding_replacement")
             if location_count > 1:
                 quality_flags.append("multiple_locations")
             if location_selection.status == "ambiguous_region":
@@ -279,6 +382,9 @@ def clean_files(
                     "disaster_type": disaster_type,
                     "disaster_match_strength": match_strength,
                     "matched_disaster_themes": matched_themes,
+                    "url_topic_relevance": topic_relevance,
+                    "publisher_title": None,
+                    "publisher_title_relevance": "unknown",
                     "themes": themes,
                     "tone": parse_tone(row.get("V1.5TONE")),
                     "geo_confidence": (
@@ -294,6 +400,39 @@ def clean_files(
                     "duplicate_group_size": 1,
                 }
             )
+
+    if title_cache_path is not None and records:
+        title_candidates = [
+            str(record["canonical_url"])
+            for record in records
+            if record["disaster_match_strength"] == "high"
+            and record.get("canonical_url")
+        ]
+        titles = fetch_publisher_titles(
+            title_candidates,
+            title_cache_path,
+            fetcher=title_fetcher,
+        )
+        stats.publisher_title_checked_rows = len(titles)
+        refined_records: list[dict[str, object]] = []
+        for record in records:
+            canonical_url = str(record.get("canonical_url") or "")
+            title = titles.get(canonical_url)
+            relevance = publisher_title_relevance(title, disaster_type)
+            record["publisher_title"] = title
+            record["publisher_title_relevance"] = relevance
+            if record["disaster_match_strength"] == "high" and relevance == "mismatch":
+                record["disaster_match_strength"] = "weak"
+                flags = list(record["quality_flags"])
+                flags.append("publisher_title_topic_mismatch")
+                record["quality_flags"] = flags
+                stats.publisher_title_mismatch_rows += 1
+                if MATCH_STRENGTH["weak"] < MATCH_STRENGTH[minimum_strength]:
+                    stats.weak_rows_skipped += 1
+                    stats.disaster_rows -= 1
+                    continue
+            refined_records.append(record)
+        records = refined_records
 
     frame = pl.from_dicts(records, schema=OUTPUT_SCHEMA, strict=False)
     if frame.height:
@@ -317,12 +456,23 @@ def parse_args() -> argparse.Namespace:
         default="high",
         help="high excludes ambiguous theme-only matches such as metaphorical 'flooded'",
     )
+    parser.add_argument(
+        "--title-cache",
+        type=Path,
+        help="optional cache used to verify high-confidence rows with opaque URLs",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    stats = clean_file(args.input, args.output, args.disaster, args.minimum_strength)
+    stats = clean_file(
+        args.input,
+        args.output,
+        args.disaster,
+        args.minimum_strength,
+        args.title_cache,
+    )
     print(json.dumps({**asdict(stats), "output": str(args.output)}, indent=2))
 
 

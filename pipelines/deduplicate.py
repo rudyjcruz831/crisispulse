@@ -11,22 +11,52 @@ from urllib.parse import unquote, urlsplit
 GENERIC_SLUG_TOKENS = {"article", "index", "news", "story", "update", "latest"}
 
 
+def _slug_tokens(segment: str) -> list[str]:
+    slug = re.sub(
+        r"\.(?:html?|aspx?|php)$", "", unquote(segment), flags=re.IGNORECASE
+    )
+    return [
+        token
+        for token in re.findall(r"[a-z0-9]+", slug.lower())
+        if not token.isdigit() and token not in GENERIC_SLUG_TOKENS
+    ]
+
+
+def title_like_path_segment(canonical_url: str | None) -> str | None:
+    """Return the last human-readable URL segment, skipping trailing IDs."""
+    if not canonical_url:
+        return None
+    segments = [segment for segment in urlsplit(canonical_url).path.split("/") if segment]
+    for segment in reversed(segments):
+        decoded = re.sub(
+            r"\.(?:html?|aspx?|php)$", "", unquote(segment), flags=re.IGNORECASE
+        ).strip()
+        if not decoded or decoded.isdigit():
+            continue
+        if re.fullmatch(
+            r"(?:article[_-]?)?[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}",
+            decoded,
+            flags=re.IGNORECASE,
+        ):
+            continue
+        words = re.findall(r"[^\W\d_]+", decoded, flags=re.UNICODE)
+        if len(words) >= 3 or (len(words) >= 2 and sum(map(len, words)) >= 8):
+            return decoded
+    return None
+
+
 def normalized_story_slug(canonical_url: str | None) -> str | None:
-    """Extract a conservative title-like key from the final URL path segment."""
+    """Extract a conservative title-like key, skipping trailing numeric IDs."""
     if not canonical_url:
         return None
     segments = [segment for segment in urlsplit(canonical_url).path.split("/") if segment]
     if not segments:
         return None
-    slug = re.sub(r"\.(?:html?|aspx?|php)$", "", unquote(segments[-1]), flags=re.IGNORECASE)
-    tokens = [
-        token
-        for token in re.findall(r"[a-z0-9]+", slug.lower())
-        if not token.isdigit() and token not in GENERIC_SLUG_TOKENS
-    ]
-    if len(tokens) < 5:
-        return None
-    return "-".join(tokens)
+    for segment in reversed(segments):
+        tokens = _slug_tokens(segment)
+        if len(tokens) >= 5:
+            return "-".join(tokens)
+    return None
 
 
 def story_group(

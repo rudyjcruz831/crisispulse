@@ -92,6 +92,7 @@ def build_features(input_path: Path, output_path: Path) -> FeatureStats:
             .cast(pl.Int64)
             .alias("weak_article_count"),
             pl.col("source_domain")
+            .filter(pl.col("disaster_match_strength") == "high")
             .drop_nulls()
             .n_unique()
             .cast(pl.Int64)

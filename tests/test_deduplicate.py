@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pipelines.deduplicate import normalized_story_slug, story_group
+from pipelines.deduplicate import normalized_story_slug, story_group, title_like_path_segment
 
 
 def test_same_long_slug_in_same_window_groups_across_domains() -> None:
@@ -20,3 +20,25 @@ def test_short_generic_slug_falls_back_to_article_identity() -> None:
     )
     assert group_id == "article-id"
     assert method == "canonical_url"
+
+
+def test_trailing_numeric_article_id_uses_the_title_segment() -> None:
+    url = (
+        "https://one.test/article/astronomers-identify-new-type-of-black-hole-star-"
+        "in-universe-while-hunting-space-mystery/73487469"
+    )
+    expected = (
+        "astronomers-identify-new-type-of-black-hole-star-in-universe-while-hunting-"
+        "space-mystery"
+    )
+    assert title_like_path_segment(url) == expected
+    assert normalized_story_slug(url) == expected
+
+
+def test_numeric_article_ids_group_syndicated_copies_by_title() -> None:
+    first = "https://one.test/article/flash-flooding-disaster-assistance-minnesota/73487469"
+    second = "https://two.test/article/flash-flooding-disaster-assistance-minnesota/73487469"
+    seen_at = datetime(2026, 8, 20, 14, 15)
+    assert story_group(first, seen_at, "flood", "one") == story_group(
+        second, seen_at, "flood", "two"
+    )

@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,9 +22,10 @@ import (
 const (
 	maxReviewRequestBytes = 16 << 10
 	maxReviewLogBytes     = 4 << 20
+	minimumReviewSample   = 20
 )
 
-var regionCodePattern = regexp.MustCompile(`^[A-Za-z0-9:_-]{1,64}$`)
+var regionCodePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9:_-]{0,63}$`)
 
 type reviewRequest struct {
 	RegionCode  string `json:"region_code"`
@@ -45,6 +47,19 @@ type reviewsResponse struct {
 
 type reviewResponse struct {
 	Review reviewRecord `json:"review"`
+}
+
+type reviewSummaryResponse struct {
+	TotalReviews       int      `json:"total_reviews"`
+	ConfirmedEvents    int      `json:"confirmed_events"`
+	IrrelevantNews     int      `json:"irrelevant_news"`
+	Uncertain          int      `json:"uncertain"`
+	ResolvedReviews    int      `json:"resolved_reviews"`
+	MinimumSample      int      `json:"minimum_sample"`
+	RemainingToSample  int      `json:"remaining_to_sample"`
+	ConfirmedEventRate *float64 `json:"confirmed_event_rate"`
+	IrrelevantNewsRate *float64 `json:"irrelevant_news_rate"`
+	Status             string   `json:"status"`
 }
 
 type reviewStore struct {
@@ -102,6 +117,98 @@ func (service *api) reviewDecisions(writer http.ResponseWriter, request *http.Re
 		writer.Header().Set("Allow", "GET, HEAD, POST")
 		writeError(writer, http.StatusMethodNotAllowed, "method not allowed")
 	}
+}
+
+func (service *api) reviewSummary(writer http.ResponseWriter, request *http.Request) {
+	if !requireGet(writer, request) {
+		return
+	}
+	reviews, err := service.reviews.list()
+	if err != nil {
+		service.logger.Printf("review summary unavailable: %v", err)
+		writeError(writer, http.StatusInternalServerError, "review summary unavailable")
+		return
+	}
+	writer.Header().Set("Cache-Control", "no-store")
+	writeJSON(writer, http.StatusOK, summarizeReviews(reviews))
+}
+
+func summarizeReviews(reviews []reviewRecord) reviewSummaryResponse {
+	summary := reviewSummaryResponse{
+		TotalReviews:  len(reviews),
+		MinimumSample: minimumReviewSample,
+		Status:        "collecting_labels",
+	}
+	for _, review := range reviews {
+		switch review.Decision {
+		case "confirmed_event":
+			summary.ConfirmedEvents++
+		case "irrelevant_news":
+			summary.IrrelevantNews++
+		case "uncertain":
+			summary.Uncertain++
+		}
+	}
+	summary.ResolvedReviews = summary.ConfirmedEvents + summary.IrrelevantNews
+	summary.RemainingToSample = max(0, minimumReviewSample-summary.ResolvedReviews)
+	if summary.ResolvedReviews >= minimumReviewSample {
+		confirmedRate := float64(summary.ConfirmedEvents) / float64(summary.ResolvedReviews)
+		irrelevantRate := float64(summary.IrrelevantNews) / float64(summary.ResolvedReviews)
+		summary.ConfirmedEventRate = &confirmedRate
+		summary.IrrelevantNewsRate = &irrelevantRate
+		summary.Status = "sample_ready"
+	}
+	return summary
+}
+
+func (service *api) reviewExport(writer http.ResponseWriter, request *http.Request) {
+	if !requireGet(writer, request) {
+		return
+	}
+	reviews, err := service.reviews.list()
+	if err != nil {
+		service.logger.Printf("review export unavailable: %v", err)
+		writeError(writer, http.StatusInternalServerError, "review export unavailable")
+		return
+	}
+	var output bytes.Buffer
+	csvWriter := csv.NewWriter(&output)
+	if err := csvWriter.Write([]string{"signal_id", "region_code", "window_start", "decision", "reviewed_at"}); err != nil {
+		writeError(writer, http.StatusInternalServerError, "review export unavailable")
+		return
+	}
+	for _, review := range reviews {
+		if err := csvWriter.Write([]string{
+			spreadsheetSafe(review.SignalID),
+			spreadsheetSafe(review.RegionCode),
+			spreadsheetSafe(review.WindowStart),
+			spreadsheetSafe(review.Decision),
+			spreadsheetSafe(review.ReviewedAt),
+		}); err != nil {
+			writeError(writer, http.StatusInternalServerError, "review export unavailable")
+			return
+		}
+	}
+	csvWriter.Flush()
+	if err := csvWriter.Error(); err != nil {
+		writeError(writer, http.StatusInternalServerError, "review export unavailable")
+		return
+	}
+	writer.Header().Set("Cache-Control", "no-store")
+	writer.Header().Set("Content-Disposition", `attachment; filename="crisispulse-reviews.csv"`)
+	writer.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	writer.WriteHeader(http.StatusOK)
+	if request.Method != http.MethodHead {
+		_, _ = writer.Write(output.Bytes())
+	}
+}
+
+func spreadsheetSafe(value string) string {
+	trimmed := strings.TrimLeft(value, " \t\r\n")
+	if trimmed != "" && strings.ContainsRune("=+-@", rune(trimmed[0])) {
+		return "'" + value
+	}
+	return value
 }
 
 var errInvalidReview = errors.New("invalid review decision")
@@ -214,6 +321,9 @@ func (store *reviewStore) list() ([]reviewRecord, error) {
 		if err := json.Unmarshal(line, &record); err != nil {
 			return nil, fmt.Errorf("invalid review log entry: %w", err)
 		}
+		if err := validateStoredReview(record); err != nil {
+			return nil, fmt.Errorf("invalid review log entry: %w", err)
+		}
 		latest[record.SignalID] = record
 	}
 	if err := scanner.Err(); err != nil {
@@ -228,6 +338,23 @@ func (store *reviewStore) list() ([]reviewRecord, error) {
 		return strings.Compare(reviews[left].ReviewedAt, reviews[right].ReviewedAt) > 0
 	})
 	return reviews, nil
+}
+
+func validateStoredReview(record reviewRecord) error {
+	if err := validateReview(reviewRequest{
+		RegionCode:  record.RegionCode,
+		WindowStart: record.WindowStart,
+		Decision:    record.Decision,
+	}); err != nil {
+		return err
+	}
+	if record.SignalID != signalID(record.RegionCode, record.WindowStart) {
+		return errors.New("signal ID does not match review fields")
+	}
+	if _, err := time.Parse(time.RFC3339Nano, record.ReviewedAt); err != nil {
+		return errors.New("invalid review timestamp")
+	}
+	return nil
 }
 
 func requireJSONEnd(decoder *json.Decoder) error {

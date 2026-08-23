@@ -22,11 +22,14 @@ The default address is `http://127.0.0.1:8080`, and the default allowed dashboar
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/health` | Confirm the API process is available. |
+| `GET` | `/health` or `/api/v1/health` | Confirm the API process is available. |
+| `GET` | `/api/v1/admin/status` | Return sanitized refresh health, permanent-article counts, and raw-storage usage for the local admin page. |
 | `GET` | `/api/v1/snapshot` | Return the complete dashboard snapshot, including bounded source evidence for displayed signals. |
 | `GET` | `/api/v1/signals` | Return the update time, candidate count, and supported signal rows. |
 | `GET` | `/api/v1/reviews` | Return the latest saved decision for each reviewed signal. |
 | `POST` | `/api/v1/reviews` | Append a validated review decision to the local audit log. |
+| `GET` | `/api/v1/reviews/summary` | Return label counts and sample-readiness metrics. |
+| `GET` | `/api/v1/reviews/export.csv` | Download the latest decision for each reviewed signal as CSV. |
 
 ### Health response
 
@@ -36,6 +39,10 @@ The default address is `http://127.0.0.1:8080`, and the default allowed dashboar
   "status": "ok"
 }
 ```
+
+### Admin status
+
+The read-only admin response reports API availability, refresh health, the last successful refresh, the next expected 15-minute refresh, permanent archived-article count and compressed size, and bounded raw-file counts. A refresh is marked `degraded` when the latest recorded run failed or the last success is more than 30 minutes old. Local paths, filenames, credentials, and raw error details are never returned.
 
 ### Save a review decision
 
@@ -48,6 +55,10 @@ The default address is `http://127.0.0.1:8080`, and the default allowed dashboar
 ```
 
 `decision` must be `confirmed_event`, `irrelevant_news`, or `uncertain`. Posting another decision for the same region and hour preserves the earlier audit entry while making the latest value current.
+
+### Review-quality summary
+
+The summary counts only the latest decision for each stable signal ID. `confirmed_event_rate` and `irrelevant_news_rate` remain `null` until at least 20 reviews are resolved as either `confirmed_event` or `irrelevant_news`; `uncertain` labels remain in the dataset but do not count toward that minimum. These rates describe human review outcomes, not externally verified disaster accuracy.
 
 ### Signals response
 
@@ -74,10 +85,12 @@ The default address is `http://127.0.0.1:8080`, and the default allowed dashboar
 ## Safety and scope
 
 - Snapshot and signal routes remain read-only. The review route accepts only `GET`, `HEAD`, and validated JSON `POST` requests.
+- The admin-status route is read-only, capped at 64 KiB, and exposes only a fixed allowlist of operational fields.
 - Snapshot responses use `Cache-Control: no-store` and are capped at 2 MiB.
 - Signal evidence is limited to eight distinct story groups and eight validated HTTP(S) publisher links per story.
 - Review requests are capped at 16 KiB, the append-only review log is capped at 4 MiB, and untrusted browser origins are rejected before writes.
+- The CSV export is generated from validated local records and contains only the latest decision per signal.
 - Internal file paths and parser errors are logged locally but not returned to callers.
-- The API writes only the local review log. It has no remote accounts, paid services, or public network listener.
+- By default the API writes only the local review log and has no public network listener. In the optional single-server package it remains private on the container network; Caddy is the only public listener and requires the shared pilot login for every route except health checks.
 - A `confirmed_event` review is a human label for model evaluation; it is not an emergency warning.
 - The dashboard falls back to its bundled verified snapshot if the API cannot be reached.

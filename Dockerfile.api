@@ -1,0 +1,17 @@
+FROM golang:1.27.0-alpine AS builder
+
+WORKDIR /src
+COPY go.mod ./
+COPY cmd/api ./cmd/api
+RUN go test ./cmd/api && \
+    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/crisispulse-api ./cmd/api
+
+FROM alpine:3.23
+RUN apk add --no-cache ca-certificates && \
+    addgroup -S -g 10001 crisispulse && \
+    adduser -S -D -H -u 10001 -G crisispulse crisispulse
+USER crisispulse
+WORKDIR /app
+COPY --from=builder /out/crisispulse-api /usr/local/bin/crisispulse-api
+EXPOSE 8080
+ENTRYPOINT ["crisispulse-api"]
