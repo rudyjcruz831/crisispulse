@@ -46,7 +46,11 @@ The default address is `http://127.0.0.1:8080`, and the default allowed dashboar
 
 ### Admin status
 
-The read-only admin response reports API availability, refresh health, the last successful refresh, the next expected 15-minute refresh, permanent archived-article count and compressed size, and bounded raw-file counts. A refresh is marked `degraded` when the latest recorded run failed or the last success is more than 30 minutes old. Local paths, filenames, credentials, and raw error details are never returned.
+The read-only admin response reports API availability, refresh health, the last successful refresh, the next expected 15-minute refresh, permanent archived-article count and compressed size, bounded raw-file counts, verified-backup freshness, and a server-calculated 48-hour reliability check. A normal `running` refresh remains healthy while its prior success is current and the run is younger than 15 minutes; a failed, stalled, or more-than-30-minute-old refresh is degraded. Raw pipeline errors are replaced with fixed safe messages, so local paths, filenames, credentials, source URLs, and parser details are never returned.
+
+`refresh.soak` advances only when a refresh finishes. It passes after 48 observed hours with at least 95% of expected 15-minute runs. A failed or interrupted attempt or a gap longer than 30 minutes restarts the active proof, while lifetime failure/missed/interrupted counters remain visible. Time while the computer is asleep does not count. `pilot_readiness.status` can become `ready_for_pilot_setup` only when that proof is current and the latest integrity-checked backup is less than 26 hours old. This means setup may begin; it is not a customer-readiness or public-launch claim.
+
+Readiness is fail-closed: the API enforces the versioned 48-hour/15-minute policy, requires the reliability record to end at the same recent success used for current refresh health, rejects future or inconsistent timestamps, and accepts only a current backup whose application data passed JSON, JSONL, and Parquet validation.
 
 ### Save a review decision
 
@@ -95,7 +99,7 @@ Strong-match relevance and weak-match relevance remain `null` until at least 20 
 ## Safety and scope
 
 - Snapshot and signal routes remain read-only. The review route accepts only `GET`, `HEAD`, and validated JSON `POST` requests.
-- The admin-status route is read-only, capped at 64 KiB, and exposes only a fixed allowlist of operational fields.
+- The admin-status source is read-only, capped at 256 KiB, and exposes only a fixed allowlist of operational fields. The persisted run ledger itself is capped at 256 terminal records.
 - Snapshot responses use `Cache-Control: no-store` and are capped at 2 MiB.
 - Signal evidence is limited to eight distinct story groups and eight validated HTTP(S) publisher links per story.
 - Review requests are capped at 16 KiB, the append-only review log is capped at 4 MiB, and untrusted browser origins are rejected before writes.

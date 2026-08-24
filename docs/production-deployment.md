@@ -35,8 +35,9 @@ One server runs the dashboard, API, refresh worker, health monitor, and daily ba
 - A Linux-native, locked 15-minute refresh with persistent state.
 - Clear URL-headline mismatch filtering before an item can create an alert.
 - A health monitor that logs stale refreshes and can call an optional webhook.
-- Daily compressed backups that preserve the permanent article/feature history and exclude only re-downloadable raw GDELT ZIP files.
-- A guarded restore job that refuses to run without explicit confirmation.
+- Daily verified backups that wait for the refresh lock, preserve review logs and permanent history, and exclude only re-downloadable raw GDELT ZIP files and the runtime lock.
+- A sanitized atomic backup-status record containing verification time, archive size, and SHA-256 checksum.
+- A guarded fresh-volume restore that refuses corrupt or unsafe archives, a reachable API, a busy lock, and every nonempty target volume.
 - A one-command build/update script after the server is prepared.
 
 ## Local no-cost validation
@@ -53,6 +54,12 @@ Put only the generated hash in `.env.production`, then run:
 sh production/deploy.sh
 sh production/smoke-test.sh
 ```
+
+The default smoke test verifies that health is public while the dashboard,
+admin page, and snapshot reject unauthenticated requests. To check the private
+flows too, use `CRISISPULSE_SMOKE_AUTH=1 sh production/smoke-test.sh`. `curl`
+prompts for the shared pilot password; the plaintext is not placed in the
+repository, environment file, or command line.
 
 The local production URL defaults to `http://localhost:8088`. This uses the existing computer and has no CrisisPulse hosting charge.
 
@@ -73,9 +80,13 @@ CRISISPULSE_SITE_ADDRESS=your-domain.example
 CRISISPULSE_PUBLIC_ORIGIN=https://your-domain.example
 CRISISPULSE_HTTP_PORT=80
 CRISISPULSE_HTTPS_PORT=443
+CRISISPULSE_STATE_VOLUME=crisispulse_crisis_state
+CRISISPULSE_WORK_VOLUME=crisispulse_crisis_work
 ```
 
 Point the domain to the server, allow inbound TCP ports 80 and 443, and run `sh production/deploy.sh`. Do not place card details, passwords, or the plaintext pilot password in the repository or this chat.
+
+Do not expose the paid server to the internet until the host or edge has failed-login throttling (for example, a tested firewall/fail2ban rule or provider edge rate limit) in front of Caddy Basic Auth. Password hashing is deliberately CPU-intensive, so a strong password alone does not prevent a parallel login spray from exhausting a one-CPU pilot server. Before inviting a user, verify normal login, repeated `401` responses, the throttle/temporary block, recovery after its cooldown, and continued access to the public health endpoint. This is a paid-server deployment gate; it is not needed for the loopback-only no-cost soak.
 
 Install the timers after the first successful refresh:
 
@@ -94,9 +105,91 @@ The unit files assume the repository is at `/opt/crisispulse`.
 - Refresh logs: `sudo journalctl -u crisispulse-refresh.service`
 - Application status: `docker compose --env-file .env.production -f compose.production.yml ps`
 - Manual backup: `docker compose --env-file .env.production -f compose.production.yml --profile maintenance run --rm backup`
+- Latest sanitized backup verification: `cat backups/backup-status.json`
 
-To restore, stop the application first, set `RESTORE_ARCHIVE` to a file under `/backups`, set `CONFIRM_RESTORE=YES` for that command only, run the restore service, and start the application again. Restore should be tested on a disposable server before relying on it.
+Every successful backup is fully listed before publication, requires the core
+dashboard/status/history files, rejects unsafe and non-file entries, writes an
+adjacent `.sha256` sidecar for that exact archive, and updates
+`backups/backup-status.json` atomically. A failed run records only `failed`; it
+does not expose host paths or raw tool errors through the API. The archive
+includes `reviews.jsonl` and `article-reviews.jsonl` whenever they exist. The
+same-server copy is operational convenience, not disaster recovery: copy the
+verified archive and checksum to encrypted off-server storage before accepting
+paid review work.
+
+## Restore drill with fresh volumes
+
+Never point the restore service at the live volume names. It deliberately
+refuses nonempty targets and never deletes files. Use an exact reviewed archive
+name and new volume names:
+
+```sh
+sudo systemctl stop crisispulse-refresh.timer crisispulse-backup.timer
+docker compose --env-file .env.production -f compose.production.yml stop caddy monitor api dashboard
+
+export CRISISPULSE_STATE_VOLUME=crisispulse_restore_state_20260825
+export CRISISPULSE_WORK_VOLUME=crisispulse_restore_work_20260825
+export RESTORE_ARCHIVE=/backups/crisispulse-YYYYMMDDTHHMMSSZ.tar.gz
+export CONFIRM_RESTORE=YES
+
+docker compose --env-file .env.production -f compose.production.yml --profile maintenance run --rm restore
+unset CONFIRM_RESTORE RESTORE_ARCHIVE
+```
+
+Restore verifies the selected archive against its own `.sha256` sidecar before
+opening it. The init service creates the sole allowed pre-existing file,
+`refresh-status.lock`. Restore first proves the archive is readable, safe, and
+contains the dashboard, refresh status, feature history, and permanent article
+archive. It then requires the API to be unreachable, takes the same lock
+exclusively, extracts into the fresh volumes, and repeats required-file checks.
+
+Validate the restored data before directing public traffic to it:
+
+```sh
+docker compose --env-file .env.production -f compose.production.yml up -d api dashboard local-preview
+docker compose --env-file .env.production -f compose.production.yml exec -T api \
+  wget -q -O - http://127.0.0.1:8080/api/v1/admin/status
+```
+
+Compare archived-article and review counts with the source installation. If the
+drill passes, write the two tested volume names into `.env.production`, unset
+the two exported volume variables so Compose reads the saved values, then start
+the protected services, run both smoke-test modes, and resume the timers. The
+old live volumes remain untouched and provide the immediate rollback target.
+If validation fails, unset the two exported variables, retain the previous
+volume names in `.env.production`, and restart the old installation; retain the
+failed fresh volumes for diagnosis.
+
+## Deployment and rollback
+
+`production/deploy.sh` now detects existing data in the configured state or
+work volume and refuses to update it unless a new pre-deploy backup completes
+with `verified` status. It
+builds Caddy, API, dashboard, monitor, and refresh images so an older auxiliary
+image cannot survive an update.
+
+Before deploying, record the current commit and image list. Keep that commit,
+the old Docker volumes, and the verified pre-deploy archive until the release
+has completed its observation window. Roll back immediately for any of these:
+
+- authentication bypass, invalid HTTPS, or protected content available without a login;
+- API, dashboard, or Caddy restart loops, or more than 5% request failures for five minutes;
+- two consecutive refresh failures, no successful refresh for 30 minutes, or a refresh approaching the 14-minute timeout;
+- an unexpected article-count decrease, missing or unwritable review logs, or invalid dashboard data;
+- failed backup verification, a verified backup older than 26 hours, an OOM kill, or less than 20% disk space remaining.
+
+For a code-only problem, stop the timers, capture logs, check out the recorded
+last-known-good commit, rebuild all five images, and run the smoke test. Preserve
+the live volumes when the data format is compatible. For suspected state or
+schema corruption, keep the bad volumes untouched and promote a successfully
+validated fresh-volume restore instead. Resume timers only after public health,
+authentication, admin status, snapshot loading, record counts, and a new manual
+backup all pass.
 
 ## Reliability and growth limits
 
-This version has one failure domain: if the server or its disk fails, the service is unavailable until restored. The daily backup is stored on the same server by default, so a later paid milestone should copy encrypted backups off-server. At roughly $3,000 monthly recurring revenue—or earlier if customers require an SLA—revisit managed identity, a second server, off-server backups, and automated failover.
+This version has one compute failure domain: if the server fails, the service is
+unavailable until restored. A verified encrypted off-server backup is required
+before the paid pilot because the local backup directory shares the server's
+disk. At roughly $3,000 monthly recurring revenue—or earlier if customers
+require an SLA—revisit managed identity, a second server, and automated failover.

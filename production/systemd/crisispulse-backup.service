@@ -8,3 +8,4 @@ Type=oneshot
 WorkingDirectory=/opt/crisispulse
 ExecStart=/usr/bin/docker compose --env-file .env.production -f compose.production.yml --profile maintenance run --rm backup
 TimeoutStartSec=30min
+UMask=0077

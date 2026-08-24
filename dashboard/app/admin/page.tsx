@@ -60,6 +60,38 @@ type QualityNotice = {
   kind: "success" | "error";
   message: string;
 };
+type SoakStatus = {
+  status: "not_started" | "in_progress" | "passed" | "failed";
+  started_at: string | null;
+  last_observed_at: string | null;
+  completed_at: string | null;
+  target_hours: number;
+  interval_minutes: number;
+  observed_minutes: number;
+  remaining_minutes: number;
+  successful_runs: number;
+  expected_runs: number;
+  failed_runs: number;
+  missed_runs: number;
+  interrupted_runs: number;
+  current_stale: boolean;
+  coverage_percent: number;
+  progress_percent: number;
+  last_failure_at: string | null;
+  last_reset_at: string | null;
+  reset_reason: string;
+};
+type BackupStatus = {
+  status: "not_checked" | "verified" | "failed";
+  verified_at: string | null;
+  age_hours: number | null;
+};
+type PilotReadiness = {
+  status: "not_ready" | "ready_for_pilot_setup";
+  local_reliability_passed: boolean;
+  backup_verified: boolean;
+  blockers: string[];
+};
 type AdminStatus = {
   service: { name: string; status: string };
   refresh: {
@@ -85,7 +117,10 @@ type AdminStatus = {
     title_backfill_updated_articles?: number;
     title_backfill_remaining_articles?: number;
     title_backfill_downgraded_articles?: number;
+    soak?: SoakStatus;
   };
+  backup?: BackupStatus;
+  pilot_readiness?: PilotReadiness;
 };
 
 const formatNumber = (value: number) => value.toLocaleString("en-US");
@@ -97,8 +132,10 @@ const formatBytes = (value: number | null | undefined) => {
   return `${value} B`;
 };
 const formatEastern = (value: string) => {
-  const date = new Date(value.endsWith("Z") ? value : `${value}Z`);
-  if (Number.isNaN(date.getTime())) return value || "—";
+  if (!value) return "—";
+  const hasExplicitTimezone = /(?:Z|[+-]\d{2}:\d{2})$/i.test(value);
+  const date = new Date(hasExplicitTimezone ? value : `${value}Z`);
+  if (Number.isNaN(date.getTime())) return "—";
   return date.toLocaleString("en-US", {
     month: "short",
     day: "numeric",
@@ -110,6 +147,38 @@ const formatEastern = (value: string) => {
 };
 const formatPercent = (value: number | null | undefined) =>
   value === null || value === undefined ? "—" : `${(value * 100).toFixed(1)}%`;
+const clampPercent = (value: number | null | undefined) =>
+  value === null || value === undefined || !Number.isFinite(value)
+    ? 0
+    : Math.min(100, Math.max(0, value));
+const formatDuration = (value: number | null | undefined) => {
+  if (value === null || value === undefined || !Number.isFinite(value)) return "—";
+  const minutes = Math.max(0, Math.round(value));
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  if (hours === 0) return `${remainder}m`;
+  if (remainder === 0) return `${hours}h`;
+  return `${hours}h ${remainder}m`;
+};
+const safeCount = (value: number | null | undefined) =>
+  value === null || value === undefined || !Number.isFinite(value)
+    ? 0
+    : Math.max(0, Math.round(value));
+const readinessBlockerLabels: Record<string, string> = {
+  soak_not_started: "The first completed refresh still needs to start the 48-hour check.",
+  soak_in_progress: "The uninterrupted 48-hour reliability check is still running.",
+  soak_failed: "The reliability check restarted after a refresh problem.",
+  soak_evidence_mismatch: "The reliability record does not match the latest completed refresh.",
+  refresh_stale: "The latest scheduled refresh is more than 30 minutes old.",
+  refresh_unhealthy: "The latest collection has not completed successfully.",
+  coverage_below_target: "Too many scheduled refreshes were missed during this check.",
+  backup_not_verified: "A readable safety backup still needs to be verified.",
+  backup_failed: "The latest safety-backup check did not pass.",
+  backup_too_old: "The last verified safety backup is more than 26 hours old.",
+  local_reliability_not_passed: "Local collection reliability has not passed yet.",
+  local_reliability: "Local collection reliability has not passed yet.",
+  verified_backup: "A readable safety backup still needs to be verified.",
+};
 const qualityArticlesURL = "/api/v1/quality/articles";
 const qualitySummaryURL = "/api/v1/quality/articles/summary";
 const qualityExportURL = "/api/v1/quality/articles/export.csv";
@@ -126,12 +195,25 @@ const safeArticleURL = (value: string) => {
     return null;
   }
 };
-const settledJSON = async <T,>(result: PromiseSettledResult<Response>): Promise<T | null> => {
-  if (result.status !== "fulfilled" || !result.value.ok) return null;
+const fetchJSONWithTimeout = async <T,>(
+  url: string,
+  parentSignal?: AbortSignal,
+  timeoutMilliseconds = 8_000,
+): Promise<T | null> => {
+  const controller = new AbortController();
+  const abortFromParent = () => controller.abort();
+  if (parentSignal?.aborted) controller.abort();
+  else parentSignal?.addEventListener("abort", abortFromParent, { once: true });
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMilliseconds);
   try {
-    return await result.value.json() as T;
+    const response = await fetch(url, { cache: "no-store", signal: controller.signal });
+    if (!response.ok) return null;
+    return await response.json() as T;
   } catch {
     return null;
+  } finally {
+    window.clearTimeout(timeout);
+    parentSignal?.removeEventListener("abort", abortFromParent);
   }
 };
 
@@ -141,12 +223,16 @@ export default function AdminPage() {
   const [qualitySummary, setQualitySummary] = useState<ArticleQualitySummary | null>(null);
   const [adminStatus, setAdminStatus] = useState<AdminStatus | null>(null);
   const [connection, setConnection] = useState<"loading" | "ready" | "offline">("loading");
+  const [adminStatusAvailability, setAdminStatusAvailability] = useState<"loading" | "ready" | "offline">("loading");
   const [checking, setChecking] = useState(false);
   const [savingArticleReview, setSavingArticleReview] = useState<SavingArticleReview | null>(null);
   const [qualityNotice, setQualityNotice] = useState<QualityNotice | null>(null);
   const [showReviewedArticles, setShowReviewedArticles] = useState(false);
   const requestInFlight = useRef(false);
   const reviewRequestInFlight = useRef(false);
+  const focusAfterReview = useRef(false);
+  const qualityGridRef = useRef<HTMLDivElement>(null);
+  const qualityNoticeRef = useRef<HTMLParagraphElement>(null);
   const { snapshot, forecast } = dashboardData;
   const pendingQualityArticles = qualitySample?.articles.filter((article) => !article.decision) ?? [];
   const reviewedQualityArticles = qualitySample?.articles.filter((article) => Boolean(article.decision)) ?? [];
@@ -158,29 +244,39 @@ export default function AdminPage() {
     if (requestInFlight.current) return;
     requestInFlight.current = true;
     setChecking(true);
+    // Fail closed while checking so a prior Go result can never linger.
+    setAdminStatus(null);
+    setAdminStatusAvailability("loading");
     try {
-      const options: RequestInit = { cache: "no-store", signal };
-      const [snapshotResult, statusResult, qualityResult, qualitySummaryResult] = await Promise.allSettled([
-        fetch("/api/v1/snapshot", options),
-        fetch("/api/v1/admin/status", options),
-        fetch(qualityArticlesURL, options),
-        fetch(qualitySummaryURL, options),
+      const statusRequest = fetchJSONWithTimeout<AdminStatus>(
+        "/api/v1/admin/status",
+        signal,
+        5_000,
+      );
+      const supportingRequests = Promise.all([
+        fetchJSONWithTimeout<DashboardData>("/api/v1/snapshot", signal),
+        fetchJSONWithTimeout<QualitySample>(qualityArticlesURL, signal),
+        fetchJSONWithTimeout<ArticleQualitySummary>(qualitySummaryURL, signal),
       ]);
-      const [nextData, nextStatus, nextQuality, nextQualitySummary] = await Promise.all([
-        settledJSON<DashboardData>(snapshotResult),
-        settledJSON<AdminStatus>(statusResult),
-        settledJSON<QualitySample>(qualityResult),
-        settledJSON<ArticleQualitySummary>(qualitySummaryResult),
-      ]);
+
+      const nextStatus = await statusRequest;
       if (signal?.aborted) return;
 
       let live = false;
-      if (nextData?.snapshot && nextData.forecast) {
-        setDashboardData(nextData);
-        live = true;
-      }
       if (nextStatus?.service && nextStatus.refresh) {
         setAdminStatus(nextStatus);
+        setAdminStatusAvailability("ready");
+        live = true;
+      } else {
+        // Never retain a previous Go result when the live status endpoint fails.
+        setAdminStatus(null);
+        setAdminStatusAvailability("offline");
+      }
+
+      const [nextData, nextQuality, nextQualitySummary] = await supportingRequests;
+      if (signal?.aborted) return;
+      if (nextData?.snapshot && nextData.forecast) {
+        setDashboardData(nextData);
         live = true;
       }
       if (nextQuality?.articles) {
@@ -227,6 +323,15 @@ export default function AdminPage() {
     return () => window.clearTimeout(timeout);
   }, [qualityNotice]);
 
+  useEffect(() => {
+    if (!focusAfterReview.current || qualityNotice?.kind !== "success") return;
+    focusAfterReview.current = false;
+    const nextReviewButton = qualityGridRef.current?.querySelector<HTMLButtonElement>(
+      ".review-button:not(:disabled)",
+    );
+    (nextReviewButton ?? qualityNoticeRef.current)?.focus();
+  }, [qualityNotice, qualitySample]);
+
   const refreshQualitySummary = async () => {
     try {
       const response = await fetch(qualitySummaryURL, { cache: "no-store" });
@@ -256,6 +361,7 @@ export default function AdminPage() {
       if (payload.review.article_id !== article.article_id || payload.review.decision !== decision) {
         throw new Error("Article review API returned an unexpected answer");
       }
+      focusAfterReview.current = true;
       setQualitySample((current) => current ? {
         ...current,
         articles: current.articles.map((item) => item.article_id === article.article_id
@@ -289,8 +395,12 @@ export default function AdminPage() {
   };
 
   const modelReady = forecast.model.status === "ready";
-  const refreshHealthy = connection === "ready" && adminStatus?.refresh.health === "healthy";
-  const overallStatus = refreshHealthy && modelReady ? "Operating normally" : connection === "offline" ? "Local API offline" : "Attention needed";
+  const refreshHealthy = adminStatusAvailability === "ready" && adminStatus?.refresh.health === "healthy";
+  const overallStatus = refreshHealthy && modelReady
+    ? "Operating normally"
+    : adminStatusAvailability === "offline"
+      ? "Operations status unavailable"
+      : "Attention needed";
   const resolvedReviews = qualitySummary?.resolved_reviews ?? 0;
   const minimumReviews = qualitySummary?.minimum_sample ?? 20;
   const remainingReviews = qualitySummary?.remaining_to_sample ?? Math.max(0, minimumReviews - resolvedReviews);
@@ -299,6 +409,108 @@ export default function AdminPage() {
   const qualityProgress = minimumReviews > 0
     ? Math.min(100, (resolvedReviews / minimumReviews) * 100)
     : 0;
+  const liveAdminStatus = adminStatusAvailability === "ready" ? adminStatus : null;
+  const soak = liveAdminStatus?.refresh.soak ?? null;
+  const backup = liveAdminStatus?.backup ?? null;
+  const pilotReadiness = liveAdminStatus?.pilot_readiness ?? null;
+  const readinessAvailable = Boolean(soak && backup && pilotReadiness);
+  const readyForPilotSetup = Boolean(
+    readinessAvailable
+      && soak?.status === "passed"
+      && !soak.current_stale
+      && backup?.status === "verified"
+      && pilotReadiness?.status === "ready_for_pilot_setup"
+      && pilotReadiness.local_reliability_passed
+      && pilotReadiness.backup_verified,
+  );
+  const resetReasonPresent = Boolean(
+    soak?.reset_reason
+      && soak.reset_reason !== "none"
+      && soak.reset_reason !== "not_started",
+  );
+  const checkRestarted = Boolean(
+    readinessAvailable
+      && !readyForPilotSetup
+      && soak?.status !== "passed"
+      && (soak?.status === "failed" || soak?.last_reset_at || resetReasonPresent),
+  );
+  const refreshEvidenceBlocked = Boolean(
+    pilotReadiness?.blockers.some(
+      (blocker) => blocker === "refresh_stale"
+        || blocker === "refresh_unhealthy"
+        || blocker === "soak_evidence_mismatch",
+    ),
+  );
+  const readinessDecision = !readinessAvailable
+    ? adminStatusAvailability === "loading" ? "Checking readiness" : "Status unavailable"
+    : readyForPilotSetup
+      ? "Go: ready for private pilot setup"
+      : checkRestarted
+        ? "Check restarted"
+        : "Keep observing";
+  const readinessTone = !readinessAvailable
+    ? "unavailable"
+    : readyForPilotSetup
+      ? "ready"
+      : checkRestarted
+        ? "restarted"
+        : "observing";
+  const readinessHeading = !readinessAvailable
+    ? adminStatusAvailability === "loading"
+      ? "Checking the live reliability record."
+      : "Live readiness status is unavailable."
+    : readyForPilotSetup
+      ? "The local reliability check passed."
+      : checkRestarted
+        ? "The 48-hour reliability check restarted."
+        : refreshEvidenceBlocked
+          ? "The latest collection needs attention."
+        : soak?.status === "not_started"
+          ? "The first completed refresh starts the clock."
+          : soak?.status === "passed"
+            ? "Reliability passed; backup verification is still open."
+            : "Keep this computer and Docker running.";
+  const readinessSummary = !readinessAvailable
+    ? "CrisisPulse will not report a Go result until the live admin status is available."
+    : readyForPilotSetup
+      ? "Local collection is reliable enough to begin private server and sign-in setup."
+      : checkRestarted
+        ? "A failed, missed, or stale refresh started a new uninterrupted observation window."
+        : refreshEvidenceBlocked
+          ? "The reliability record remains fail-closed until a current refresh completes successfully."
+        : soak?.status === "not_started"
+          ? "No elapsed time is counted until a completed scheduled refresh is recorded."
+          : soak?.status === "passed"
+            ? "The collection window is complete. A readable safety backup must also be verified."
+            : "Progress advances with completed scheduled refreshes; time while the PC is off does not count.";
+  const soakProgress = readinessAvailable ? clampPercent(soak?.progress_percent) : 0;
+  const expectedRuns = safeCount(soak?.expected_runs);
+  const successfulRuns = safeCount(soak?.successful_runs);
+  const coveredIntervals = Math.min(successfulRuns, expectedRuns);
+  const failedRuns = safeCount(soak?.failed_runs);
+  const missedRuns = safeCount(soak?.missed_runs);
+  const interruptedRuns = safeCount(soak?.interrupted_runs);
+  const problemRuns = failedRuns + missedRuns + interruptedRuns;
+  const coverageLabel = readinessAvailable && expectedRuns > 0
+    ? `${clampPercent(soak?.coverage_percent).toFixed(1)}%`
+    : "Waiting";
+  const freshnessLabel = !readinessAvailable || !soak?.last_observed_at
+    ? "Waiting"
+    : soak.current_stale
+      ? "Stale"
+      : "Current";
+  const backupLabel = !readinessAvailable
+    ? "Unavailable"
+    : backup?.status === "verified"
+      ? safeCount(backup.age_hours) >= 26 ? "Out of date" : "Verified"
+      : backup?.status === "failed"
+        ? "Failed"
+        : "Not checked";
+  const readinessBlockers = Array.from(new Set(
+    (pilotReadiness?.blockers ?? []).map(
+      (blocker) => readinessBlockerLabels[blocker] ?? "One readiness check still needs attention.",
+    ),
+  )).slice(0, 3);
   const modelPredictions = new Map(
     forecast.model.pending_predictions.map((prediction) => [
       `${prediction.region_code}|${prediction.window_start}`,
@@ -409,16 +621,84 @@ export default function AdminPage() {
           </div>
         </article>
 
-        <aside className="admin-surface admin-readiness">
-          <p className="eyebrow">Paid pilot readiness</p>
-          <h2>{qualitySampleReady ? "Two foundations are still open." : "Three foundations are still open."}</h2>
-          <p>{qualitySampleReady ? "The first balanced article evidence sample is complete. Reliable hosting and private authentication remain." : "Article-filter evidence can now be collected here. Reliable hosting and private authentication follow."}</p>
-          <ol className="readiness-list">
-            <li className="done"><span>01</span><div><strong>Automated collection</strong><small>Running every 15 minutes</small></div></li>
-            <li className={qualitySampleReady ? "done" : "current"}><span>02</span><div><strong>Article filter evidence</strong><small>{qualitySampleReady ? "Balanced minimum reached" : qualityBalancePending ? "Balance strong and blocked reviews" : `${remainingReviews} resolved reviews remaining; balance required`}</small></div></li>
-            <li><span>03</span><div><strong>Reliable cloud server</strong><small>Deployment package not started</small></div></li>
-            <li><span>04</span><div><strong>Private customer access</strong><small>Required before this page goes online</small></div></li>
-          </ol>
+        <aside
+          className={`admin-surface admin-readiness ${readinessTone}`}
+          aria-labelledby="pilot-readiness-heading"
+        >
+          <div className="admin-section-heading readiness-heading">
+            <p className="eyebrow">48-hour reliability check</p>
+            <span
+              className={`admin-pill readiness-decision ${readinessTone}`}
+              aria-live="polite"
+              aria-atomic="true"
+            >
+              {readinessDecision}
+            </span>
+          </div>
+          <h2 id="pilot-readiness-heading">{readinessHeading}</h2>
+          <p className="readiness-summary">{readinessSummary}</p>
+
+          <div className="readiness-progress">
+            <div className="readiness-timing" id="pilot-readiness-timing">
+              <strong>{readinessAvailable ? formatDuration(soak?.observed_minutes) : "—"} observed</strong>
+              <span>{readinessAvailable ? `${formatDuration(soak?.remaining_minutes)} remaining` : "Waiting for live status"}</span>
+            </div>
+            <progress
+              aria-label="48-hour reliability check progress"
+              aria-describedby="pilot-readiness-timing"
+              max={100}
+              value={soakProgress}
+            >
+              {soakProgress.toFixed(0)}%
+            </progress>
+            <small>{readinessAvailable ? `${soakProgress.toFixed(0)}% of the uninterrupted window complete` : "Progress unavailable"}</small>
+          </div>
+
+          <dl className="readiness-metrics">
+            <div>
+              <dt>Refresh success rate</dt>
+              <dd>{coverageLabel}</dd>
+              <small>
+                {readinessAvailable && expectedRuns > 0
+                  ? `${coveredIntervals} of ${expectedRuns} 15-minute intervals covered`
+                  : "Waiting for the first completed refresh"}
+              </small>
+            </div>
+            <div>
+              <dt>Recorded problems</dt>
+              <dd>{readinessAvailable ? problemRuns : "—"}</dd>
+              <small>{readinessAvailable ? `${failedRuns} failed · ${missedRuns} missed · ${interruptedRuns} interrupted since tracking began` : "Failure totals unavailable"}</small>
+            </div>
+            <div>
+              <dt>Current freshness</dt>
+              <dd className={soak?.current_stale ? "attention" : ""}>{freshnessLabel}</dd>
+              <small>
+                {readinessAvailable && soak?.last_observed_at
+                  ? <>Last completed <time dateTime={soak.last_observed_at}>{formatEastern(soak.last_observed_at)}</time></>
+                  : "No completed refresh recorded"}
+              </small>
+            </div>
+            <div>
+              <dt>Safety backup</dt>
+              <dd className={backup?.status === "failed" || (backup?.status === "verified" && safeCount(backup.age_hours) >= 26) ? "attention" : ""}>{backupLabel}</dd>
+              <small>
+                {readinessAvailable && backup?.status === "verified" && backup.verified_at
+                  ? <>Verified <time dateTime={backup.verified_at}>{formatEastern(backup.verified_at)}</time>{backup.age_hours !== null ? ` · ${safeCount(backup.age_hours)}h old` : ""}</>
+                  : backup?.status === "failed"
+                    ? "The latest backup check did not pass"
+                    : "A readable backup has not been confirmed"}
+              </small>
+            </div>
+          </dl>
+
+          {!readyForPilotSetup && readinessBlockers.length > 0 ? (
+            <ul className="readiness-blockers" aria-label="Readiness checks still open">
+              {readinessBlockers.map((blocker) => <li key={blocker}>{blocker}</li>)}
+            </ul>
+          ) : null}
+          <p className="readiness-scope">
+            Passing this check means CrisisPulse can move to private server and sign-in setup. It does not publish the site or grant public access.
+          </p>
         </aside>
       </section>
 
@@ -511,7 +791,9 @@ export default function AdminPage() {
           <p
             aria-atomic="true"
             className={`quality-review-notice ${qualityNotice.kind}`}
+            ref={qualityNoticeRef}
             role={qualityNotice.kind === "error" ? "alert" : "status"}
+            tabIndex={-1}
           >
             <strong>{qualityNotice.kind === "success" ? "Answer saved" : "Not saved"}</strong>
             <span>{qualityNotice.message}</span>
@@ -534,7 +816,7 @@ export default function AdminPage() {
         ) : null}
 
         {qualitySample?.articles?.length && visibleQualityArticles.length ? (
-          <div className="article-quality-grid">
+          <div className="article-quality-grid" ref={qualityGridRef}>
             {visibleQualityArticles.map((article) => {
               const link = safeArticleURL(article.url);
               const isSaving = savingArticleReview?.articleID === article.article_id;
