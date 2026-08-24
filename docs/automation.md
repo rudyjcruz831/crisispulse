@@ -10,8 +10,10 @@ The local refresh workflow keeps CrisisPulse current without Docker, a cloud acc
 4. Merges feature rows into compact history by hour and disaster type, replacing each refreshed hour as one partition so regional rows that disappear are not left stale.
 5. Re-scores the accumulated history and atomically writes `%USERPROFILE%\.crisispulse\dashboard.json` for the Go API.
 6. In the Docker production workflow, upserts all current flood-matched articles into a permanent compressed Parquet archive and verifies the new archive before continuing.
-7. Keeps raw ZIPs within a 10,000,000,000-byte (10 GB) budget and removes the oldest files first. The newest refresh window is always protected, and a failed archive verification prevents all pruning.
-8. Writes the outcome to `refresh-status.json`, including permanent-archive rows and bytes.
+7. Applies checked-in, human-audited title overrides and checks a rotating batch of up to 12 archived articles that still lack a trustworthy publisher title. The safe reader reuses the same cache and robots/network protections, advances past blocked pages so they cannot starve the queue, and atomically saves successful titles back into the permanent archive. Overrides supply evidence without creating a crawler exception for a publisher that prohibits automation.
+8. Builds the stable daily article-quality sample from permanent history so filtering can be reviewed even when no alerts fire.
+9. Keeps raw ZIPs within a 10,000,000,000-byte (10 GB) budget and removes the oldest files first. The newest refresh window is always protected, and a failed archive verification prevents all pruning.
+10. Writes the outcome to `refresh-status.json`, including permanent-archive rows, bytes, and title-backfill progress.
 
 The two-hour overlap is deliberate: it lets a partial current hour be replaced by a complete hour on a later run without double-counting.
 
@@ -29,7 +31,7 @@ Inspect the local status:
 Get-Content "$env:USERPROFILE\.crisispulse\refresh-status.json"
 ```
 
-A successful production status includes the first and last source filenames, the count of downloaded versus already-present files, the count processed from the first safe hour boundary, permanent article rows and bytes, retained raw-file count and bytes, the configured storage limit, and any files pruned by retention.
+A successful production status includes the first and last source filenames, the count of downloaded versus already-present files, the count processed from the first safe hour boundary, permanent article rows and bytes, title-backfill attempts/updates/remaining rows, retained raw-file count and bytes, the configured storage limit, and any files pruned by retention.
 
 ## Enable the 15-minute task
 

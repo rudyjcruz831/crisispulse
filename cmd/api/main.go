@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -50,16 +51,20 @@ type refreshStatusFile struct {
 	LastSuccessAt string `json:"last_success_at"`
 	Message       string `json:"message"`
 	Details       struct {
-		ProcessedFiles       int   `json:"processed_files"`
-		DownloadedFiles      int   `json:"downloaded_files"`
-		AlreadyPresentFiles  int   `json:"already_present_files"`
-		RetainedRawFiles     int   `json:"retained_raw_files"`
-		RetainedRawBytes     int64 `json:"retained_raw_bytes"`
-		RawStorageLimitBytes int64 `json:"raw_storage_limit_bytes"`
-		PrunedRawFiles       int   `json:"pruned_raw_files"`
-		ArchivedArticles     int   `json:"archived_articles"`
-		NewArchivedArticles  int   `json:"new_archived_articles"`
-		ArticleArchiveBytes  int64 `json:"article_archive_bytes"`
+		ProcessedFiles          int   `json:"processed_files"`
+		DownloadedFiles         int   `json:"downloaded_files"`
+		AlreadyPresentFiles     int   `json:"already_present_files"`
+		RetainedRawFiles        int   `json:"retained_raw_files"`
+		RetainedRawBytes        int64 `json:"retained_raw_bytes"`
+		RawStorageLimitBytes    int64 `json:"raw_storage_limit_bytes"`
+		PrunedRawFiles          int   `json:"pruned_raw_files"`
+		ArchivedArticles        int   `json:"archived_articles"`
+		NewArchivedArticles     int   `json:"new_archived_articles"`
+		ArticleArchiveBytes     int64 `json:"article_archive_bytes"`
+		TitleBackfillAttempted  int   `json:"title_backfill_attempted_articles"`
+		TitleBackfillUpdated    int   `json:"title_backfill_updated_articles"`
+		TitleBackfillRemaining  int   `json:"title_backfill_remaining_articles"`
+		TitleBackfillDowngraded int   `json:"title_backfill_downgraded_articles"`
 	} `json:"details"`
 }
 
@@ -69,32 +74,38 @@ type adminStatusResponse struct {
 		Status string `json:"status"`
 	} `json:"service"`
 	Refresh struct {
-		Status                string `json:"status"`
-		Health                string `json:"health"`
-		StartedAt             string `json:"started_at"`
-		FinishedAt            string `json:"finished_at"`
-		LastSuccessAt         string `json:"last_success_at"`
-		ExpectedNextRefreshAt string `json:"expected_next_refresh_at"`
-		AgeMinutes            int    `json:"age_minutes"`
-		Message               string `json:"message"`
-		ProcessedFiles        int    `json:"processed_files"`
-		DownloadedFiles       int    `json:"downloaded_files"`
-		AlreadyPresentFiles   int    `json:"already_present_files"`
-		RetainedRawFiles      int    `json:"retained_raw_files"`
-		RetainedRawBytes      int64  `json:"retained_raw_bytes"`
-		RawStorageLimitBytes  int64  `json:"raw_storage_limit_bytes"`
-		PrunedRawFiles        int    `json:"pruned_raw_files"`
-		ArchivedArticles      int    `json:"archived_articles"`
-		NewArchivedArticles   int    `json:"new_archived_articles"`
-		ArticleArchiveBytes   int64  `json:"article_archive_bytes"`
+		Status                  string `json:"status"`
+		Health                  string `json:"health"`
+		StartedAt               string `json:"started_at"`
+		FinishedAt              string `json:"finished_at"`
+		LastSuccessAt           string `json:"last_success_at"`
+		ExpectedNextRefreshAt   string `json:"expected_next_refresh_at"`
+		AgeMinutes              int    `json:"age_minutes"`
+		Message                 string `json:"message"`
+		ProcessedFiles          int    `json:"processed_files"`
+		DownloadedFiles         int    `json:"downloaded_files"`
+		AlreadyPresentFiles     int    `json:"already_present_files"`
+		RetainedRawFiles        int    `json:"retained_raw_files"`
+		RetainedRawBytes        int64  `json:"retained_raw_bytes"`
+		RawStorageLimitBytes    int64  `json:"raw_storage_limit_bytes"`
+		PrunedRawFiles          int    `json:"pruned_raw_files"`
+		ArchivedArticles        int    `json:"archived_articles"`
+		NewArchivedArticles     int    `json:"new_archived_articles"`
+		ArticleArchiveBytes     int64  `json:"article_archive_bytes"`
+		TitleBackfillAttempted  int    `json:"title_backfill_attempted_articles"`
+		TitleBackfillUpdated    int    `json:"title_backfill_updated_articles"`
+		TitleBackfillRemaining  int    `json:"title_backfill_remaining_articles"`
+		TitleBackfillDowngraded int    `json:"title_backfill_downgraded_articles"`
 	} `json:"refresh"`
 }
 
 type api struct {
-	dataPath   string
-	statusPath string
-	reviews    *reviewStore
-	logger     *log.Logger
+	dataPath          string
+	statusPath        string
+	qualitySamplePath string
+	reviews           *reviewStore
+	articleReviews    *articleReviewStore
+	logger            *log.Logger
 }
 
 func main() {
@@ -138,7 +149,7 @@ func parseFlags() config {
 	flag.StringVar(&cfg.address, "addr", "127.0.0.1:8080", "HTTP listen address")
 	flag.StringVar(&cfg.dataPath, "data", defaultDashboardPath(), "dashboard snapshot JSON")
 	flag.StringVar(&cfg.reviewPath, "reviews", defaultReviewPath(), "review decision log")
-	flag.StringVar(&cfg.allowedOrigin, "allowed-origin", "http://localhost:3000", "allowed dashboard origin")
+	flag.StringVar(&cfg.allowedOrigin, "allowed-origin", "http://localhost:3000", "comma-separated allowed dashboard origins")
 	flag.Parse()
 	return cfg
 }
@@ -161,10 +172,12 @@ func defaultReviewPath() string {
 
 func newHandler(dataPath, reviewPath, allowedOrigin string, logger *log.Logger) http.Handler {
 	service := &api{
-		dataPath:   dataPath,
-		statusPath: filepath.Join(filepath.Dir(dataPath), "refresh-status.json"),
-		reviews:    newReviewStore(reviewPath),
-		logger:     logger,
+		dataPath:          dataPath,
+		statusPath:        filepath.Join(filepath.Dir(dataPath), "refresh-status.json"),
+		qualitySamplePath: filepath.Join(filepath.Dir(dataPath), "quality-review-sample.json"),
+		reviews:           newReviewStore(reviewPath),
+		articleReviews:    newArticleReviewStore(filepath.Join(filepath.Dir(reviewPath), "article-reviews.jsonl")),
+		logger:            logger,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", service.health)
@@ -175,6 +188,9 @@ func newHandler(dataPath, reviewPath, allowedOrigin string, logger *log.Logger) 
 	mux.HandleFunc("/api/v1/reviews", service.reviewDecisions)
 	mux.HandleFunc("/api/v1/reviews/summary", service.reviewSummary)
 	mux.HandleFunc("/api/v1/reviews/export.csv", service.reviewExport)
+	mux.HandleFunc("/api/v1/quality/articles", service.qualityArticles)
+	mux.HandleFunc("/api/v1/quality/articles/summary", service.qualityArticleSummary)
+	mux.HandleFunc("/api/v1/quality/articles/export.csv", service.qualityArticleExport)
 	return withSecurityHeaders(withCORS(mux, allowedOrigin))
 }
 
@@ -244,6 +260,10 @@ func (service *api) adminStatus(writer http.ResponseWriter, request *http.Reques
 	response.Refresh.ArchivedArticles = max(0, status.Details.ArchivedArticles)
 	response.Refresh.NewArchivedArticles = max(0, status.Details.NewArchivedArticles)
 	response.Refresh.ArticleArchiveBytes = max(int64(0), status.Details.ArticleArchiveBytes)
+	response.Refresh.TitleBackfillAttempted = max(0, status.Details.TitleBackfillAttempted)
+	response.Refresh.TitleBackfillUpdated = max(0, status.Details.TitleBackfillUpdated)
+	response.Refresh.TitleBackfillRemaining = max(0, status.Details.TitleBackfillRemaining)
+	response.Refresh.TitleBackfillDowngraded = max(0, status.Details.TitleBackfillDowngraded)
 	writer.Header().Set("Cache-Control", "no-store")
 	writeJSON(writer, http.StatusOK, response)
 }
@@ -324,15 +344,21 @@ func requireGet(writer http.ResponseWriter, request *http.Request) bool {
 	return false
 }
 
-func withCORS(next http.Handler, allowedOrigin string) http.Handler {
+func withCORS(next http.Handler, configuredOrigins string) http.Handler {
+	allowedOrigins := make(map[string]struct{})
+	for _, configuredOrigin := range strings.Split(configuredOrigins, ",") {
+		if origin := strings.TrimSpace(configuredOrigin); origin != "" {
+			allowedOrigins[origin] = struct{}{}
+		}
+	}
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		origin := request.Header.Get("Origin")
-		if origin != "" && origin != allowedOrigin {
-			writeError(writer, http.StatusForbidden, "origin not allowed")
-			return
-		}
 		if origin != "" {
-			writer.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
+			if _, allowed := allowedOrigins[origin]; !allowed {
+				writeError(writer, http.StatusForbidden, "origin not allowed")
+				return
+			}
+			writer.Header().Set("Access-Control-Allow-Origin", origin)
 			writer.Header().Set("Vary", "Origin")
 		}
 		if request.Method == http.MethodOptions {

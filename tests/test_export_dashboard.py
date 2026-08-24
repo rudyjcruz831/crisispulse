@@ -155,12 +155,13 @@ def test_dashboard_snapshot_prefers_candidates_and_summarizes_outputs(tmp_path):
     title_cache_path.write_text(
         json.dumps(
             {
-                "version": 1,
+                "version": 3,
                 "entries": {
                     "https://one.test/flood-report": {
                         "status": "ok",
                         "title": "Flooding closes roads across the county",
                         "fetched_at": "2099-01-01T00:00:00+00:00",
+                        "parser_version": 3,
                     }
                 },
             }

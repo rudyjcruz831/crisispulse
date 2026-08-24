@@ -23,7 +23,7 @@ The starter writes one row per unique canonical article URL. GDELT processing ti
 | `disaster_match_strength` | string | `high` for explicit event themes or `weak` for ambiguous theme-only evidence. |
 | `matched_disaster_themes` | list[string] | Theme tokens that caused the disaster classification. |
 | `url_topic_relevance` | string | `supporting`, `mismatch`, or `unknown` comparison between a readable URL headline and the selected disaster topic. A mismatch downgrades a high GDELT theme to weak. |
-| `publisher_title` | string/null | Bounded title read from permitted publisher metadata or HTML; null when unavailable. |
+| `publisher_title` | string/null | Bounded title read from permitted publisher metadata or HTML, or supplied by an audited manual override when automated reading is prohibited; null when unavailable. |
 | `publisher_title_relevance` | string | `supporting`, `mismatch`, or `unknown` comparison between the publisher title and the selected disaster topic. A mismatch downgrades a high match to weak. |
 | `themes` | list[string] | Unique normalized GKG theme tokens found on the record. |
 | `tone` | float/null | First value from GDELT's tone field. It is weak evidence, not a severity measurement. |
@@ -38,6 +38,12 @@ Current quality flags are `invalid_url`, `invalid_seen_at`, `missing_location`, 
 ## Permanent article archive
 
 `flood_articles_archive.parquet` uses the same columns above and is keyed by `article_id`. Each production refresh upserts the current cleaned batch, preferring the latest checked version of a repeated article. The file uses zstd compression and is atomically replaced only after a read-back check proves that every current article ID is present. It is retained independently of the 10 GB raw ZIP cache and included in production backups.
+
+## Daily article-quality sample
+
+`quality-review-sample.json` is regenerated after permanent archival and remains stable for one UTC day. It contains 24 recent articles when the archive has enough data, balanced across `high_match`, `headline_conflict`, and `ambiguous_match`. Each item carries only bounded review evidence: stable article ID, timestamp, title, title source (`manual_override`, `publisher_metadata`, `url_path`, or `unavailable`), safe publisher URL/domain, location, match strength, review reason, matched themes, and quality flags. Publisher metadata is preferred; the URL-path parser removes common dates, IDs, UUIDs, file extensions, and generic route segments. `manual_override` means the exact publisher page was human-verified and recorded in the checked-in audit file because normal automated reading was prohibited. When no trustworthy source yields a headline, the sample explicitly reports that the title is unavailable rather than displaying a domain or opaque identifier as a headline.
+
+Human decisions are stored separately in append-only `article-reviews.jsonl` as `relevant`, `not_relevant`, or `uncertain`. The API collapses corrections to the latest decision per `article_id` while retaining earlier audit entries on disk.
 
 ## Regional/hourly feature Parquet
 

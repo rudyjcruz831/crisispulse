@@ -48,6 +48,26 @@ services:
       dashboard:
         condition: service_healthy
 
+  local-preview:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: [no-new-privileges:true]
+    logging: *default-logging
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
+    ports:
+      - "127.0.0.1:${CRISISPULSE_LOCAL_PREVIEW_PORT:-3000}:80"
+    volumes:
+      - ./production/Caddyfile.local:/etc/caddy/Caddyfile:ro
+    depends_on:
+      api:
+        condition: service_healthy
+      dashboard:
+        condition: service_healthy
+
   api:
     build:
       context: .
@@ -65,7 +85,7 @@ services:
       - --reviews
       - /var/lib/crisispulse/reviews.jsonl
       - --allowed-origin
-      - ${CRISISPULSE_PUBLIC_ORIGIN:-http://localhost:8088}
+      - ${CRISISPULSE_PUBLIC_ORIGIN:-http://localhost:8088},${CRISISPULSE_LOCAL_PREVIEW_ORIGIN:-http://localhost:3000}
     volumes:
       - crisis_state:/var/lib/crisispulse
     depends_on:
@@ -138,6 +158,8 @@ services:
       - ${CRISISPULSE_RETENTION_BYTES:-10000000000}
       - --workers
       - ${CRISISPULSE_REFRESH_WORKERS:-8}
+      - --title-backfill-batch
+      - ${CRISISPULSE_TITLE_BACKFILL_BATCH:-12}
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
