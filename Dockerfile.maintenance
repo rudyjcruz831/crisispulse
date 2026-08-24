@@ -1,0 +1,23 @@
+FROM python:3.13.15-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y \
+        ca-certificates \
+        coreutils \
+        findutils \
+        grep \
+        gzip \
+        mawk \
+        tar \
+        util-linux \
+        wget \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt/crisispulse
+COPY requirements.maintenance.txt ./
+RUN pip install --no-cache-dir --requirement requirements.maintenance.txt
+
+COPY --chmod=0555 production/backup.sh production/restore.sh production/validate_application_data.py ./

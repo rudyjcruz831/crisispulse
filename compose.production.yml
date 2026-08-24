@@ -6,18 +6,32 @@ x-logging: &default-logging
     max-size: "10m"
     max-file: "3"
 
+x-maintenance-build: &maintenance-build
+  context: .
+  dockerfile: Dockerfile.maintenance
+
 services:
   init-volumes:
     image: alpine:3.23
     cap_drop: [ALL]
     cap_add: [CHOWN, DAC_OVERRIDE, FOWNER]
     security_opt: [no-new-privileges:true]
-    command: ["/bin/sh", "-c", "chown -R 10001:10001 /state /work /caddy-data /caddy-config"]
+    command:
+      - /bin/sh
+      - -c
+      - >-
+        touch /state/refresh-status.lock &&
+        chown -R 10001:10001 /state /work /caddy-data /caddy-config &&
+        chown 10001:10001 /backups &&
+        if [ -e /backups/backup.lock ]; then chown 10001:10001 /backups/backup.lock; fi &&
+        chmod 0644 /state/refresh-status.lock &&
+        chmod 0755 /backups
     volumes:
       - crisis_state:/state
       - crisis_work:/work
       - caddy_data:/caddy-data
       - caddy_config:/caddy-config
+      - ./backups:/backups
 
   caddy:
     build:
@@ -84,10 +98,13 @@ services:
       - /var/lib/crisispulse/dashboard.json
       - --reviews
       - /var/lib/crisispulse/reviews.jsonl
+      - --backup-status
+      - /var/lib/crisispulse-backups/backup-status.json
       - --allowed-origin
       - ${CRISISPULSE_PUBLIC_ORIGIN:-http://localhost:8088},${CRISISPULSE_LOCAL_PREVIEW_ORIGIN:-http://localhost:3000}
     volumes:
       - crisis_state:/var/lib/crisispulse
+      - ./backups:/var/lib/crisispulse-backups:ro
     depends_on:
       init-volumes:
         condition: service_completed_successfully
@@ -174,7 +191,15 @@ services:
 
   backup:
     profiles: ["maintenance"]
-    image: alpine:3.23
+    build: *maintenance-build
+    image: crisispulse-maintenance:local
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    network_mode: none
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=128m
     environment:
       CRISISPULSE_BACKUP_RETENTION_DAYS: ${CRISISPULSE_BACKUP_RETENTION_DAYS:-14}
     command: ["/bin/sh", "/opt/crisispulse/backup.sh"]
@@ -182,11 +207,20 @@ services:
       - crisis_state:/state:ro
       - crisis_work:/work:ro
       - ./backups:/backups
-      - ./production/backup.sh:/opt/crisispulse/backup.sh:ro
+    depends_on:
+      init-volumes:
+        condition: service_completed_successfully
 
   restore:
     profiles: ["maintenance"]
-    image: alpine:3.23
+    build: *maintenance-build
+    image: crisispulse-maintenance:local
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=128m
     environment:
       CONFIRM_RESTORE: ${CONFIRM_RESTORE:-NO}
       RESTORE_ARCHIVE: ${RESTORE_ARCHIVE:-}
@@ -195,10 +229,14 @@ services:
       - crisis_state:/state
       - crisis_work:/work
       - ./backups:/backups:ro
-      - ./production/restore.sh:/opt/crisispulse/restore.sh:ro
+    depends_on:
+      init-volumes:
+        condition: service_completed_successfully
 
 volumes:
   crisis_state:
+    name: ${CRISISPULSE_STATE_VOLUME:-crisispulse_crisis_state}
   crisis_work:
+    name: ${CRISISPULSE_WORK_VOLUME:-crisispulse_crisis_work}
   caddy_data:
   caddy_config:

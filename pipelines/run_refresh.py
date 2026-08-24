@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import tempfile
 from contextlib import contextmanager
@@ -40,6 +41,16 @@ from pipelines.train_media_spread import train_media_spread_model
 
 
 DEFAULT_RAW_RETENTION_BYTES = 10_000_000_000
+REFRESH_STATUS_VERSION = 3
+MAX_RECENT_RUNS = 256
+SOAK_TARGET_HOURS = 48
+SOAK_INTERVAL_MINUTES = 15
+SOAK_MAX_GAP_MINUTES = 30
+SOAK_MINIMUM_COVERAGE_PERCENT = 95.0
+TERMINAL_REFRESH_STATUSES = frozenset({"success", "failed", "interrupted"})
+SOAK_RESET_REASONS = frozenset(
+    {"none", "failed_refresh", "interrupted_refresh", "refresh_gap"}
+)
 
 
 class RefreshAlreadyRunning(RuntimeError):
@@ -72,6 +83,313 @@ def _refresh_lock(lock_path: Path) -> Iterator[TextIO]:
         stream.close()
 
 
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def _parse_status_time(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return None
+    return parsed.astimezone(UTC)
+
+
+def _status_time(value: datetime) -> str:
+    return _as_utc(value).isoformat()
+
+
+def _read_status(status_path: Path) -> dict[str, object]:
+    try:
+        payload = json.loads(status_path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _nonnegative_int(value: object, default: int = 0) -> int:
+    if isinstance(value, bool):
+        return default
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError, OverflowError):
+        return default
+
+
+def _bounded_percent(value: object, default: float = 0.0) -> float:
+    if isinstance(value, bool):
+        return default
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return default
+    if not math.isfinite(number):
+        return default
+    return round(min(100.0, max(0.0, number)), 2)
+
+
+def _normalized_status_time(value: object) -> str:
+    parsed = _parse_status_time(value)
+    return _status_time(parsed) if parsed is not None else ""
+
+
+def _empty_soak() -> dict[str, object]:
+    return {
+        "status": "not_started",
+        "started_at": "",
+        "last_observed_at": "",
+        "completed_at": "",
+        "target_hours": SOAK_TARGET_HOURS,
+        "interval_minutes": SOAK_INTERVAL_MINUTES,
+        "observed_minutes": 0,
+        "remaining_minutes": SOAK_TARGET_HOURS * 60,
+        "successful_runs": 0,
+        "expected_runs": 0,
+        "last_covered_slot": -1,
+        "failed_runs": 0,
+        "missed_runs": 0,
+        "interrupted_runs": 0,
+        "reset_count": 0,
+        "coverage_percent": 0.0,
+        "progress_percent": 0.0,
+        "last_failure_at": "",
+        "last_reset_at": "",
+        "reset_reason": "none",
+    }
+
+
+def _sanitized_soak(value: object) -> dict[str, object]:
+    soak = _empty_soak()
+    if not isinstance(value, dict):
+        return soak
+
+    status = value.get("status")
+    if status in {"not_started", "in_progress", "passed"}:
+        soak["status"] = status
+    for field in (
+        "started_at",
+        "last_observed_at",
+        "completed_at",
+        "last_failure_at",
+        "last_reset_at",
+    ):
+        soak[field] = _normalized_status_time(value.get(field))
+    for field in (
+        "observed_minutes",
+        "remaining_minutes",
+        "successful_runs",
+        "expected_runs",
+        "failed_runs",
+        "missed_runs",
+        "interrupted_runs",
+        "reset_count",
+    ):
+        soak[field] = _nonnegative_int(value.get(field), int(soak[field]))
+    try:
+        last_covered_slot = int(value.get("last_covered_slot", -1))
+    except (TypeError, ValueError, OverflowError):
+        last_covered_slot = -1
+    soak["last_covered_slot"] = max(-1, last_covered_slot)
+    soak["coverage_percent"] = _bounded_percent(value.get("coverage_percent"))
+    soak["progress_percent"] = _bounded_percent(value.get("progress_percent"))
+    reset_reason = value.get("reset_reason")
+    if reset_reason in SOAK_RESET_REASONS:
+        soak["reset_reason"] = reset_reason
+
+    # These are policy constants, not caller-controlled status values.
+    soak["target_hours"] = SOAK_TARGET_HOURS
+    soak["interval_minutes"] = SOAK_INTERVAL_MINUTES
+    return soak
+
+
+def _sanitized_run(value: object) -> dict[str, object] | None:
+    if not isinstance(value, dict) or value.get("status") not in TERMINAL_REFRESH_STATUSES:
+        return None
+    started_at = _parse_status_time(value.get("started_at"))
+    finished_at = _parse_status_time(value.get("finished_at"))
+    if started_at is None or finished_at is None or finished_at < started_at:
+        return None
+    return {
+        "status": value["status"],
+        "started_at": _status_time(started_at),
+        "finished_at": _status_time(finished_at),
+        "duration_seconds": max(
+            0, int((finished_at - started_at).total_seconds())
+        ),
+    }
+
+
+def _recent_runs(value: object) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        return []
+    sanitized = [run for item in value if (run := _sanitized_run(item))]
+    return sanitized[-MAX_RECENT_RUNS:]
+
+
+def _terminal_run(
+    status: str,
+    started_at: datetime,
+    finished_at: datetime,
+) -> dict[str, object]:
+    normalized_start = _as_utc(started_at)
+    normalized_finish = max(normalized_start, _as_utc(finished_at))
+    return {
+        "status": status,
+        "started_at": _status_time(normalized_start),
+        "finished_at": _status_time(normalized_finish),
+        "duration_seconds": max(
+            0, int((normalized_finish - normalized_start).total_seconds())
+        ),
+    }
+
+
+def _legacy_terminal_run(payload: dict[str, object]) -> dict[str, object] | None:
+    if payload.get("status") not in {"success", "failed"}:
+        return None
+    return _sanitized_run(
+        {
+            "status": payload.get("status"),
+            "started_at": payload.get("started_at"),
+            "finished_at": payload.get("finished_at"),
+        }
+    )
+
+
+def _reset_active_soak(
+    soak: dict[str, object],
+    *,
+    reset_at: datetime,
+    reason: str,
+) -> None:
+    if reason not in SOAK_RESET_REASONS or reason == "none":
+        raise ValueError("invalid soak reset reason")
+    soak.update(
+        {
+            "status": "not_started",
+            "started_at": "",
+            "last_observed_at": _status_time(reset_at),
+            "completed_at": "",
+            "observed_minutes": 0,
+            "remaining_minutes": SOAK_TARGET_HOURS * 60,
+            "successful_runs": 0,
+            "expected_runs": 0,
+            "last_covered_slot": -1,
+            "coverage_percent": 0.0,
+            "progress_percent": 0.0,
+            "reset_count": _nonnegative_int(soak.get("reset_count")) + 1,
+            "last_reset_at": _status_time(reset_at),
+            "reset_reason": reason,
+        }
+    )
+
+
+def _advance_soak(
+    soak_value: object,
+    prior_runs: list[dict[str, object]],
+    run: dict[str, object],
+) -> dict[str, object]:
+    soak = _sanitized_soak(soak_value)
+    status = str(run["status"])
+    started_at = _parse_status_time(run["started_at"])
+    finished_at = _parse_status_time(run["finished_at"])
+    if started_at is None or finished_at is None:
+        return soak
+
+    if status in {"failed", "interrupted"}:
+        if status == "failed":
+            soak["failed_runs"] = _nonnegative_int(soak.get("failed_runs")) + 1
+            reset_reason = "failed_refresh"
+        else:
+            soak["interrupted_runs"] = (
+                _nonnegative_int(soak.get("interrupted_runs")) + 1
+            )
+            reset_reason = "interrupted_refresh"
+        soak["last_failure_at"] = _status_time(finished_at)
+        _reset_active_soak(soak, reset_at=finished_at, reason=reset_reason)
+        return soak
+
+    previous_run = prior_runs[-1] if prior_runs else None
+    gap_reset = False
+    if previous_run is not None and previous_run.get("status") == "success":
+        previous_finished = _parse_status_time(previous_run.get("finished_at"))
+        if previous_finished is not None:
+            gap_seconds = (finished_at - previous_finished).total_seconds()
+            interval_seconds = SOAK_INTERVAL_MINUTES * 60
+            if gap_seconds < 0 or gap_seconds > SOAK_MAX_GAP_MINUTES * 60:
+                if gap_seconds > 0:
+                    missed = max(0, int(gap_seconds // interval_seconds) - 1)
+                    soak["missed_runs"] = (
+                        _nonnegative_int(soak.get("missed_runs")) + missed
+                    )
+                _reset_active_soak(
+                    soak,
+                    reset_at=finished_at,
+                    reason="refresh_gap",
+                )
+                gap_reset = True
+
+    proof_started = _parse_status_time(soak.get("started_at"))
+    if proof_started is None or gap_reset:
+        proof_started = finished_at
+        successful_runs = 1
+        current_slot = 0
+    else:
+        observed_seconds = max(0.0, (finished_at - proof_started).total_seconds())
+        interval_seconds = SOAK_INTERVAL_MINUTES * 60
+        current_slot = int(observed_seconds // interval_seconds)
+        previous_slot = max(-1, int(soak.get("last_covered_slot", -1)))
+        successful_runs = min(
+            _nonnegative_int(soak.get("successful_runs")),
+            previous_slot + 1,
+        )
+        if current_slot > previous_slot:
+            successful_runs += 1
+            missed = max(0, current_slot - previous_slot - 1)
+            soak["missed_runs"] = (
+                _nonnegative_int(soak.get("missed_runs")) + missed
+            )
+
+    observed_seconds = max(0.0, (finished_at - proof_started).total_seconds())
+    target_seconds = SOAK_TARGET_HOURS * 60 * 60
+    expected_runs = int(observed_seconds // (SOAK_INTERVAL_MINUTES * 60)) + 1
+    coverage_percent = min(100.0, successful_runs / expected_runs * 100.0)
+    passed = (
+        observed_seconds >= target_seconds
+        and coverage_percent >= SOAK_MINIMUM_COVERAGE_PERCENT
+    )
+    previous_completed = _normalized_status_time(soak.get("completed_at"))
+    soak.update(
+        {
+            "status": "passed" if passed else "in_progress",
+            "started_at": _status_time(proof_started),
+            "last_observed_at": _status_time(finished_at),
+            "completed_at": (
+                previous_completed
+                if passed and previous_completed
+                else _status_time(finished_at) if passed else ""
+            ),
+            "observed_minutes": int(observed_seconds // 60),
+            "remaining_minutes": max(
+                0, math.ceil((target_seconds - observed_seconds) / 60)
+            ),
+            "successful_runs": successful_runs,
+            "expected_runs": expected_runs,
+            "last_covered_slot": current_slot,
+            "coverage_percent": round(coverage_percent, 2),
+            "progress_percent": round(
+                min(100.0, observed_seconds / target_seconds * 100.0), 2
+            ),
+        }
+    )
+    return soak
+
+
 def _write_status(
     status_path: Path,
     *,
@@ -80,15 +398,70 @@ def _write_status(
     message: str,
     details: dict[str, object] | None = None,
     previous_success: str | None = None,
+    observed_at: datetime | None = None,
 ) -> None:
-    finished_at = None if status == "running" else datetime.now(UTC).isoformat()
+    if status not in {"running", "success", "failed"}:
+        raise ValueError("invalid refresh status")
+
+    observed = _as_utc(observed_at or datetime.now(UTC))
+    previous = _read_status(status_path)
+    upgrading = previous.get("schema_version") != REFRESH_STATUS_VERSION
+    runs = [] if upgrading else _recent_runs(previous.get("recent_runs"))
+    soak = _empty_soak() if upgrading else _sanitized_soak(previous.get("soak"))
+
+    if upgrading:
+        legacy_run = _legacy_terminal_run(previous)
+        if legacy_run is not None:
+            soak = _advance_soak(soak, runs, legacy_run)
+            runs.append(legacy_run)
+
+    normalized_start = _as_utc(started_at)
+    prior_started_at = _parse_status_time(previous.get("started_at"))
+    if status == "running" and previous.get("status") == "running":
+        interrupted_start = prior_started_at or normalized_start
+        interrupted = _terminal_run(
+            "interrupted",
+            interrupted_start,
+            max(interrupted_start, normalized_start),
+        )
+        soak = _advance_soak(soak, runs, interrupted)
+        runs.append(interrupted)
+
+    terminal_finished: datetime | None = None
+    if status in {"success", "failed"}:
+        # A failure handler runs outside run_refresh. The current status is the
+        # durable source of the real start time for the failed attempt.
+        if previous.get("status") == "running" and prior_started_at is not None:
+            normalized_start = prior_started_at
+        terminal_finished = max(normalized_start, observed)
+        terminal = _terminal_run(status, normalized_start, terminal_finished)
+        soak = _advance_soak(soak, runs, terminal)
+        runs.append(terminal)
+
+    runs = runs[-MAX_RECENT_RUNS:]
+    stored_previous_success = _normalized_status_time(
+        previous.get("last_success_at")
+    )
+    fallback_previous_success = _normalized_status_time(previous_success)
+    last_success_at = stored_previous_success or fallback_previous_success
+    if status == "success" and terminal_finished is not None:
+        last_success_at = _status_time(terminal_finished)
+
+    prior_details = previous.get("details")
+    if not isinstance(prior_details, dict):
+        prior_details = {}
     payload = {
+        "schema_version": REFRESH_STATUS_VERSION,
         "status": status,
-        "started_at": started_at.isoformat(),
-        "finished_at": finished_at,
-        "last_success_at": finished_at if status == "success" else previous_success,
+        "started_at": _status_time(normalized_start),
+        "finished_at": (
+            _status_time(terminal_finished) if terminal_finished is not None else None
+        ),
+        "last_success_at": last_success_at,
         "message": message[:500],
-        "details": details or {},
+        "details": details if details is not None else prior_details,
+        "soak": soak,
+        "recent_runs": runs,
     }
     status_path.parent.mkdir(parents=True, exist_ok=True)
     temporary_path: Path | None = None
@@ -112,13 +485,9 @@ def _write_status(
 
 
 def _previous_success(status_path: Path) -> str | None:
-    try:
-        value = json.loads(status_path.read_text(encoding="utf-8")).get(
-            "last_success_at"
-        )
-    except (OSError, json.JSONDecodeError, AttributeError):
-        return None
-    return value if isinstance(value, str) and value else None
+    value = _read_status(status_path).get("last_success_at")
+    normalized = _normalized_status_time(value)
+    return normalized or None
 
 
 def _select_processing_files(raw_dir: Path, window_intervals: int) -> list[Path]:
@@ -340,6 +709,33 @@ def run_refresh(
     return details
 
 
+def _run_refresh_with_lock(args: argparse.Namespace) -> dict[str, object]:
+    with _refresh_lock(args.status_path.with_suffix(".lock")):
+        try:
+            return run_refresh(
+                raw_dir=args.raw_dir,
+                work_dir=args.work_dir,
+                dashboard_output=args.dashboard_output,
+                status_path=args.status_path,
+                window_intervals=args.window_intervals,
+                retention_bytes=args.retention_bytes,
+                workers=args.workers,
+                title_backfill_batch=args.title_backfill_batch,
+            )
+        except Exception as error:
+            # The terminal status belongs to the same critical section as the
+            # refresh. Otherwise a new run could start and have its running
+            # status clobbered by this failure record.
+            _write_status(
+                args.status_path,
+                status="failed",
+                started_at=datetime.now(UTC),
+                message=str(error),
+                previous_success=_previous_success(args.status_path),
+            )
+            raise
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--raw-dir", type=Path, required=True)
@@ -362,30 +758,10 @@ def main() -> None:
     )
     args = parser.parse_args()
     try:
-        with _refresh_lock(args.status_path.with_suffix(".lock")):
-            details = run_refresh(
-                raw_dir=args.raw_dir,
-                work_dir=args.work_dir,
-                dashboard_output=args.dashboard_output,
-                status_path=args.status_path,
-                window_intervals=args.window_intervals,
-                retention_bytes=args.retention_bytes,
-                workers=args.workers,
-                title_backfill_batch=args.title_backfill_batch,
-            )
+        details = _run_refresh_with_lock(args)
     except RefreshAlreadyRunning as error:
         print(json.dumps({"status": "skipped", "message": str(error)}))
         return
-    except Exception as error:
-        started_at = datetime.now(UTC)
-        _write_status(
-            args.status_path,
-            status="failed",
-            started_at=started_at,
-            message=str(error),
-            previous_success=_previous_success(args.status_path),
-        )
-        raise
     print(json.dumps({"status": "success", "details": details}, indent=2))
 
 

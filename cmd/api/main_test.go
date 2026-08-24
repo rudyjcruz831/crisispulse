@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/sha256"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -63,6 +64,7 @@ func TestAdminStatusReturnsSanitizedRefreshHealth(t *testing.T) {
 	}
 	lastSuccess := time.Now().UTC().Add(-5 * time.Minute).Format(time.RFC3339Nano)
 	status := fmt.Sprintf(`{
+  "schema_version":3,
   "status":"success",
   "started_at":"%s",
   "finished_at":"%s",
@@ -122,6 +124,408 @@ func TestAdminStatusReturnsSanitizedRefreshHealth(t *testing.T) {
 	}
 	if strings.Contains(response.Body.String(), "dashboard_output") || strings.Contains(response.Body.String(), "private") {
 		t.Fatal("admin status leaked a local path")
+	}
+}
+
+func writeAdminFixture(t *testing.T, root, status string) http.Handler {
+	t.Helper()
+	dataPath := filepath.Join(root, "dashboard.json")
+	if err := os.WriteFile(dataPath, []byte(testDashboard), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "refresh-status.json"), []byte(status), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return newHandler(
+		dataPath,
+		filepath.Join(root, "reviews.jsonl"),
+		"http://localhost:3000",
+		log.New(io.Discard, "", 0),
+	)
+}
+
+func writeVerifiedBackupFixture(t *testing.T, root string, verifiedAt time.Time) string {
+	t.Helper()
+	archiveName := verifiedAt.UTC().Format("crisispulse-20060102T150405Z.tar.gz")
+	archivePath := filepath.Join(root, archiveName)
+	archiveData := []byte("verified CrisisPulse backup fixture\n")
+	checksum := fmt.Sprintf("%x", sha256.Sum256(archiveData))
+	if err := os.WriteFile(archivePath, archiveData, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(archivePath+".sha256", []byte(fmt.Sprintf("%s  %s\n", checksum, archiveName)), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	status := fmt.Sprintf(
+		`{"schema_version":2,"status":"verified","application_data_verified":true,"verified_at":%q,"archive_bytes":%d,"archive_name":%q,"checksum":%q}`,
+		verifiedAt.UTC().Format(time.RFC3339Nano), len(archiveData), archiveName, checksum,
+	)
+	if err := os.WriteFile(filepath.Join(root, "backup-status.json"), []byte(status), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return archivePath
+}
+
+func TestAdminStatusTreatsRecentRunningRefreshAsHealthyAndHidesRawErrors(t *testing.T) {
+	now := time.Now().UTC()
+	status := fmt.Sprintf(`{
+  "status":"running",
+  "started_at":%q,
+  "finished_at":null,
+  "last_success_at":%q,
+  "message":"C:\\private\\publisher-cache.json failed"
+}`, now.Add(-time.Minute).Format(time.RFC3339Nano), now.Add(-10*time.Minute).Format(time.RFC3339Nano))
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/status", nil)
+	response := httptest.NewRecorder()
+	writeAdminFixture(t, t.TempDir(), status).ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var body adminStatusResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Refresh.Health != "healthy" || body.Refresh.Message != "Refresh in progress" {
+		t.Fatalf("refresh = %+v", body.Refresh)
+	}
+	if strings.Contains(response.Body.String(), "private") || strings.Contains(response.Body.String(), "publisher-cache") {
+		t.Fatal("admin response leaked the raw refresh error")
+	}
+}
+
+func TestAdminStatusDegradesAStalledRunningRefresh(t *testing.T) {
+	now := time.Now().UTC()
+	status := fmt.Sprintf(`{
+  "status":"running",
+  "started_at":%q,
+  "finished_at":null,
+  "last_success_at":%q,
+  "message":"refresh started"
+}`, now.Add(-16*time.Minute).Format(time.RFC3339Nano), now.Add(-20*time.Minute).Format(time.RFC3339Nano))
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/status", nil)
+	response := httptest.NewRecorder()
+	writeAdminFixture(t, t.TempDir(), status).ServeHTTP(response, request)
+
+	var body adminStatusResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if response.Code != http.StatusOK || body.Refresh.Health != "degraded" || !body.Refresh.Soak.CurrentStale {
+		t.Fatalf("response = %+v", body)
+	}
+}
+
+func TestAdminStatusRequiresVerifiedBackupAndFullSoakForPilotSetup(t *testing.T) {
+	root := t.TempDir()
+	now := time.Now().UTC()
+	startedAt := now.Add(-49 * time.Hour)
+	lastObservedAt := now.Add(-5 * time.Minute)
+	status := fmt.Sprintf(`{
+  "schema_version":3,
+  "status":"success",
+  "started_at":%q,
+  "finished_at":%q,
+  "last_success_at":%q,
+  "message":"refresh completed",
+  "soak":{
+    "status":"passed",
+    "started_at":%q,
+    "last_observed_at":%q,
+    "completed_at":%q,
+    "target_hours":48,
+    "interval_minutes":15,
+    "successful_runs":196,
+    "failed_runs":0,
+    "missed_runs":0,
+    "interrupted_runs":0,
+    "reset_reason":"none"
+  }
+}`,
+		lastObservedAt.Format(time.RFC3339Nano),
+		lastObservedAt.Format(time.RFC3339Nano),
+		lastObservedAt.Format(time.RFC3339Nano),
+		startedAt.Format(time.RFC3339Nano),
+		lastObservedAt.Format(time.RFC3339Nano),
+		lastObservedAt.Format(time.RFC3339Nano),
+	)
+	writeVerifiedBackupFixture(t, root, now.Add(-time.Hour))
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/status", nil)
+	response := httptest.NewRecorder()
+	writeAdminFixture(t, root, status).ServeHTTP(response, request)
+
+	var body adminStatusResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if response.Code != http.StatusOK || body.Refresh.Soak.Status != "passed" {
+		t.Fatalf("response = %+v", body)
+	}
+	if body.Backup.Status != "verified" || body.PilotReadiness.Status != "ready_for_pilot_setup" {
+		t.Fatalf("readiness = %+v, backup = %+v", body.PilotReadiness, body.Backup)
+	}
+	if len(body.PilotReadiness.Blockers) != 0 {
+		t.Fatalf("blockers = %v", body.PilotReadiness.Blockers)
+	}
+}
+
+func TestAdminStatusRejectsSoakThatDoesNotEndAtLatestSuccess(t *testing.T) {
+	now := time.Now().UTC()
+	lastSuccessAt := now.Add(-5 * time.Minute)
+	staleSoakObservation := now.Add(-20 * time.Minute)
+	soakStartedAt := staleSoakObservation.Add(-48 * time.Hour)
+	for _, refreshStatus := range []string{"success", "running"} {
+		t.Run(refreshStatus, func(t *testing.T) {
+			root := t.TempDir()
+			startedAt := lastSuccessAt
+			finishedField := "null"
+			if refreshStatus == "success" {
+				finishedField = fmt.Sprintf("%q", lastSuccessAt.Format(time.RFC3339Nano))
+			} else {
+				startedAt = now.Add(-time.Minute)
+			}
+			status := fmt.Sprintf(`{
+  "schema_version":3,
+  "status":%q,
+  "started_at":%q,
+  "finished_at":%s,
+  "last_success_at":%q,
+  "soak":{
+    "status":"passed",
+    "started_at":%q,
+    "last_observed_at":%q,
+    "completed_at":%q,
+    "target_hours":48,
+    "interval_minutes":15,
+    "successful_runs":193
+  }
+}`,
+				refreshStatus,
+				startedAt.Format(time.RFC3339Nano),
+				finishedField,
+				lastSuccessAt.Format(time.RFC3339Nano),
+				soakStartedAt.Format(time.RFC3339Nano),
+				staleSoakObservation.Format(time.RFC3339Nano),
+				staleSoakObservation.Format(time.RFC3339Nano),
+			)
+			writeVerifiedBackupFixture(t, root, now.Add(-time.Hour))
+			response := httptest.NewRecorder()
+			writeAdminFixture(t, root, status).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/admin/status", nil))
+
+			var body adminStatusResponse
+			if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			if response.Code != http.StatusOK || body.PilotReadiness.Status != "not_ready" {
+				t.Fatalf("response = %+v", body)
+			}
+			if len(body.PilotReadiness.Blockers) == 0 || body.PilotReadiness.Blockers[0] != "soak_evidence_mismatch" {
+				t.Fatalf("blockers = %v", body.PilotReadiness.Blockers)
+			}
+		})
+	}
+}
+
+func TestAdminStatusFailsClosedOnCorruptBackupWithoutHidingRefresh(t *testing.T) {
+	root := t.TempDir()
+	now := time.Now().UTC().Add(-5 * time.Minute).Format(time.RFC3339Nano)
+	status := fmt.Sprintf(`{"status":"success","started_at":%q,"finished_at":%q,"last_success_at":%q}`, now, now, now)
+	if err := os.WriteFile(filepath.Join(root, "backup-status.json"), []byte("not-json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/status", nil)
+	response := httptest.NewRecorder()
+	writeAdminFixture(t, root, status).ServeHTTP(response, request)
+
+	var body adminStatusResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if response.Code != http.StatusOK || body.Refresh.Health != "healthy" {
+		t.Fatalf("response = %+v", body)
+	}
+	if body.Backup.Status != "failed" || body.PilotReadiness.Status != "not_ready" {
+		t.Fatalf("readiness = %+v, backup = %+v", body.PilotReadiness, body.Backup)
+	}
+}
+
+func TestBackupStatusRejectsLegacyMalformedAndFutureEvidence(t *testing.T) {
+	now := time.Now().UTC()
+	validChecksum := strings.Repeat("a", 64)
+	tests := map[string]string{
+		"legacy structural status": fmt.Sprintf(
+			`{"status":"verified","verified_at":%q,"archive_bytes":4096,"checksum":"%s"}`,
+			now.Add(-time.Hour).Format(time.RFC3339Nano), validChecksum,
+		),
+		"missing semantic verification": fmt.Sprintf(
+			`{"schema_version":2,"status":"verified","verified_at":%q,"archive_bytes":4096,"checksum":"%s"}`,
+			now.Add(-time.Hour).Format(time.RFC3339Nano), validChecksum,
+		),
+		"invalid checksum": fmt.Sprintf(
+			`{"schema_version":2,"status":"verified","application_data_verified":true,"verified_at":%q,"archive_bytes":4096,"checksum":"not-a-digest"}`,
+			now.Add(-time.Hour).Format(time.RFC3339Nano),
+		),
+		"future verification": fmt.Sprintf(
+			`{"schema_version":2,"status":"verified","application_data_verified":true,"verified_at":%q,"archive_bytes":4096,"checksum":"%s"}`,
+			now.Add(5*time.Minute).Format(time.RFC3339Nano), validChecksum,
+		),
+	}
+	for name, payload := range tests {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "backup-status.json")
+			if err := os.WriteFile(path, []byte(payload), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			service := api{backupStatusPath: path, logger: log.New(io.Discard, "", 0)}
+			if status := service.loadBackupStatus(now); status.Status != "failed" {
+				t.Fatalf("status = %+v", status)
+			}
+		})
+	}
+}
+
+func TestBackupStatusRequiresTheCurrentMatchingArchiveAndSidecar(t *testing.T) {
+	now := time.Now().UTC()
+	tests := map[string]func(t *testing.T, archivePath string){
+		"archive deleted": func(t *testing.T, archivePath string) {
+			if err := os.Remove(archivePath); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"archive changed at the same size": func(t *testing.T, archivePath string) {
+			data, err := os.ReadFile(archivePath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			data[0] ^= 0xff
+			if err := os.WriteFile(archivePath, data, 0o640); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"sidecar deleted": func(t *testing.T, archivePath string) {
+			if err := os.Remove(archivePath + ".sha256"); err != nil {
+				t.Fatal(err)
+			}
+		},
+	}
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			archivePath := writeVerifiedBackupFixture(t, root, now.Add(-time.Hour))
+			mutate(t, archivePath)
+			service := api{
+				backupStatusPath: filepath.Join(root, "backup-status.json"),
+				logger:           log.New(io.Discard, "", 0),
+			}
+			if status := service.loadBackupStatus(now); status.Status != "failed" {
+				t.Fatalf("status = %+v", status)
+			}
+		})
+	}
+}
+
+func TestBackupStatusCachesAnUnchangedSuccessfulArchiveHash(t *testing.T) {
+	root := t.TempDir()
+	now := time.Now().UTC()
+	writeVerifiedBackupFixture(t, root, now.Add(-time.Hour))
+	hashCalls := 0
+	service := api{
+		backupStatusPath: filepath.Join(root, "backup-status.json"),
+		logger:           log.New(io.Discard, "", 0),
+		backupHasher: func(path string) (string, int64, error) {
+			hashCalls++
+			return hashBackupArchive(path)
+		},
+	}
+	for range 2 {
+		if status := service.loadBackupStatus(now); status.Status != "verified" {
+			t.Fatalf("status = %+v", status)
+		}
+	}
+	if hashCalls != 1 {
+		t.Fatalf("archive hash calls = %d, want 1", hashCalls)
+	}
+}
+
+func TestSoakStatusRequiresTheFullObservedWindow(t *testing.T) {
+	startedAt := time.Date(2026, 8, 24, 0, 0, 0, 0, time.UTC)
+	fixture := refreshStatusFile{}
+	fixture.SchemaVersion = refreshStatusVersion
+	fixture.Soak.Status = "passed"
+	fixture.Soak.StartedAt = startedAt.Format(time.RFC3339Nano)
+	fixture.Soak.TargetHours = pilotSoakTargetHours
+	fixture.Soak.IntervalMinutes = pilotSoakInterval
+	fixture.Soak.SuccessfulRuns = 193
+	fixture.Soak.CompletedAt = startedAt.Add(48 * time.Hour).Format(time.RFC3339Nano)
+	now := startedAt.Add(49 * time.Hour)
+
+	fixture.Soak.LastObservedAt = startedAt.Add(47*time.Hour + 59*time.Minute).Format(time.RFC3339Nano)
+	before := sanitizeSoakStatus(fixture, false, now)
+	if before.Status != "in_progress" || before.RemainingMinutes != 1 {
+		t.Fatalf("before boundary = %+v", before)
+	}
+
+	fixture.Soak.LastObservedAt = startedAt.Add(48 * time.Hour).Format(time.RFC3339Nano)
+	after := sanitizeSoakStatus(fixture, false, now)
+	if after.Status != "passed" || after.RemainingMinutes != 0 || after.CoveragePercent < 95 {
+		t.Fatalf("at boundary = %+v", after)
+	}
+}
+
+func TestAdminStatusRejectsForgedPolicyAndFailedRefresh(t *testing.T) {
+	root := t.TempDir()
+	now := time.Now().UTC()
+	startedAt := now.Add(-49 * time.Hour)
+	finishedAt := now.Add(-5 * time.Minute)
+	lastSuccessAt := now.Add(-20 * time.Minute)
+	status := fmt.Sprintf(`{
+  "schema_version":3,
+  "status":"failed",
+  "started_at":%q,
+  "finished_at":%q,
+  "last_success_at":%q,
+  "soak":{
+    "status":"passed",
+    "started_at":%q,
+    "last_observed_at":%q,
+    "completed_at":%q,
+    "target_hours":1,
+    "interval_minutes":1,
+    "successful_runs":3000
+  }
+}`,
+		finishedAt.Add(-time.Minute).Format(time.RFC3339Nano),
+		finishedAt.Format(time.RFC3339Nano),
+		lastSuccessAt.Format(time.RFC3339Nano),
+		startedAt.Format(time.RFC3339Nano),
+		finishedAt.Format(time.RFC3339Nano),
+		finishedAt.Format(time.RFC3339Nano),
+	)
+	writeVerifiedBackupFixture(t, root, now.Add(-time.Hour))
+	response := httptest.NewRecorder()
+	writeAdminFixture(t, root, status).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/admin/status", nil))
+
+	var body adminStatusResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if response.Code != http.StatusOK || body.PilotReadiness.Status != "not_ready" || body.Refresh.Soak.Status != "failed" {
+		t.Fatalf("response = %+v", body)
+	}
+	if len(body.PilotReadiness.Blockers) == 0 || body.PilotReadiness.Blockers[0] != "refresh_unhealthy" {
+		t.Fatalf("blockers = %v", body.PilotReadiness.Blockers)
+	}
+}
+
+func TestAdminStatusRejectsFutureRefreshEvidence(t *testing.T) {
+	root := t.TempDir()
+	future := time.Now().UTC().Add(5 * time.Minute).Format(time.RFC3339Nano)
+	status := fmt.Sprintf(`{"schema_version":3,"status":"success","started_at":%q,"finished_at":%q,"last_success_at":%q}`, future, future, future)
+	response := httptest.NewRecorder()
+	writeAdminFixture(t, root, status).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/admin/status", nil))
+
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
 	}
 }
 
