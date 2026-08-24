@@ -105,3 +105,48 @@ def test_schema_mismatch_does_not_replace_archive(tmp_path: Path) -> None:
         merge_article_archive(invalid_path, archive_path)
 
     assert archive_path.read_bytes() == original
+
+
+def test_overlapping_refresh_preserves_backfilled_title_and_guard(tmp_path: Path) -> None:
+    archive_path = tmp_path / "archive.parquet"
+    first_path = tmp_path / "first.parquet"
+    second_path = tmp_path / "second.parquet"
+    schema = {
+        "article_id": pl.String,
+        "canonical_url": pl.String,
+        "disaster_match_strength": pl.String,
+        "publisher_title": pl.String,
+        "publisher_title_relevance": pl.String,
+        "quality_flags": pl.List(pl.String),
+    }
+    pl.DataFrame(
+        {
+            "article_id": ["a"],
+            "canonical_url": ["https://news.example/opaque/1"],
+            "disaster_match_strength": ["weak"],
+            "publisher_title": ["Funding applications open for technology companies"],
+            "publisher_title_relevance": ["mismatch"],
+            "quality_flags": [["publisher_title_topic_mismatch"]],
+        },
+        schema=schema,
+    ).write_parquet(first_path)
+    pl.DataFrame(
+        {
+            "article_id": ["a"],
+            "canonical_url": ["https://news.example/opaque/1"],
+            "disaster_match_strength": ["high"],
+            "publisher_title": [None],
+            "publisher_title_relevance": ["unknown"],
+            "quality_flags": [[]],
+        },
+        schema=schema,
+    ).write_parquet(second_path)
+
+    merge_article_archive(first_path, archive_path)
+    merge_article_archive(second_path, archive_path)
+    row = pl.read_parquet(archive_path).row(0, named=True)
+
+    assert row["publisher_title"] == "Funding applications open for technology companies"
+    assert row["publisher_title_relevance"] == "mismatch"
+    assert row["disaster_match_strength"] == "weak"
+    assert "publisher_title_topic_mismatch" in row["quality_flags"]

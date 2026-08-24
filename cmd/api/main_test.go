@@ -79,7 +79,11 @@ func TestAdminStatusReturnsSanitizedRefreshHealth(t *testing.T) {
     "pruned_raw_files":0,
     "archived_articles":4321,
     "new_archived_articles":17,
-    "article_archive_bytes":1876543
+    "article_archive_bytes":1876543,
+    "title_backfill_attempted_articles":12,
+    "title_backfill_updated_articles":9,
+    "title_backfill_remaining_articles":3810,
+    "title_backfill_downgraded_articles":2
   }
 }`, lastSuccess, lastSuccess, lastSuccess)
 	if err := os.WriteFile(
@@ -113,6 +117,9 @@ func TestAdminStatusReturnsSanitizedRefreshHealth(t *testing.T) {
 	if body.Refresh.ArchivedArticles != 4321 || body.Refresh.NewArchivedArticles != 17 || body.Refresh.ArticleArchiveBytes != 1876543 {
 		t.Fatalf("article archive response = %+v", body.Refresh)
 	}
+	if body.Refresh.TitleBackfillAttempted != 12 || body.Refresh.TitleBackfillUpdated != 9 || body.Refresh.TitleBackfillRemaining != 3810 || body.Refresh.TitleBackfillDowngraded != 2 {
+		t.Fatalf("title backfill response = %+v", body.Refresh)
+	}
 	if strings.Contains(response.Body.String(), "dashboard_output") || strings.Contains(response.Body.String(), "private") {
 		t.Fatal("admin status leaked a local path")
 	}
@@ -136,6 +143,34 @@ func TestSnapshotReturnsCurrentFileAndCORS(t *testing.T) {
 	}
 	if _, ok := body["parameters"]; !ok {
 		t.Fatal("snapshot response omitted parameters")
+	}
+}
+
+func TestSnapshotAllowsEachConfiguredDashboardOrigin(t *testing.T) {
+	temporaryRoot := t.TempDir()
+	dataPath := filepath.Join(temporaryRoot, "dashboard.json")
+	if err := os.WriteFile(dataPath, []byte(testDashboard), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	handler := newHandler(
+		dataPath,
+		filepath.Join(temporaryRoot, "reviews.jsonl"),
+		"http://localhost:8088, http://localhost:3000",
+		log.New(io.Discard, "", 0),
+	)
+
+	for _, origin := range []string{"http://localhost:8088", "http://localhost:3000"} {
+		request := httptest.NewRequest(http.MethodGet, "/api/v1/snapshot", nil)
+		request.Header.Set("Origin", origin)
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+
+		if response.Code != http.StatusOK {
+			t.Fatalf("origin %q status = %d, want %d", origin, response.Code, http.StatusOK)
+		}
+		if got := response.Header().Get("Access-Control-Allow-Origin"); got != origin {
+			t.Fatalf("origin %q Access-Control-Allow-Origin = %q", origin, got)
+		}
 	}
 }
 

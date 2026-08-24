@@ -11,8 +11,18 @@ from pathlib import Path
 
 import polars as pl
 
+from pipelines.publisher_titles import normalize_publisher_title
+
 
 KEY_COLUMN = "article_id"
+TITLE_ENRICHMENT_COLUMNS = {
+    "article_id",
+    "canonical_url",
+    "disaster_match_strength",
+    "publisher_title",
+    "publisher_title_relevance",
+    "quality_flags",
+}
 
 
 @dataclass
@@ -25,6 +35,57 @@ class ArticleArchiveStats:
     high_confidence_rows: int
     weak_confidence_rows: int
     archive_bytes: int
+
+
+def _preserve_title_enrichment(
+    existing: pl.DataFrame,
+    current: pl.DataFrame,
+) -> pl.DataFrame:
+    """Carry permanent titles into overlapping rows and recompute their guard."""
+    if not TITLE_ENRICHMENT_COLUMNS.issubset(existing.columns) or not TITLE_ENRICHMENT_COLUMNS.issubset(current.columns):
+        return current
+    existing_by_id = {
+        str(row["article_id"]): row
+        for row in existing.select(sorted(TITLE_ENRICHMENT_COLUMNS)).iter_rows(
+            named=True
+        )
+    }
+    rows = current.to_dicts()
+    changed = False
+    for row in rows:
+        article_id = str(row.get("article_id") or "")
+        previous = existing_by_id.get(article_id)
+        if previous is None:
+            continue
+        url = str(row.get("canonical_url") or "")
+        if normalize_publisher_title(row.get("publisher_title"), url):
+            continue
+        previous_title = normalize_publisher_title(
+            previous.get("publisher_title"),
+            url,
+        )
+        if not previous_title:
+            continue
+        relevance = str(previous.get("publisher_title_relevance") or "unknown")
+        if relevance not in {"supporting", "mismatch", "unknown"}:
+            relevance = "unknown"
+        flags = [
+            str(flag)
+            for flag in (row.get("quality_flags") or [])
+            if flag != "publisher_title_topic_mismatch"
+        ]
+        strength = str(row.get("disaster_match_strength") or "")
+        if strength == "high" and relevance == "mismatch":
+            strength = "weak"
+            flags.append("publisher_title_topic_mismatch")
+        row["publisher_title"] = previous_title
+        row["publisher_title_relevance"] = relevance
+        row["disaster_match_strength"] = strength
+        row["quality_flags"] = flags
+        changed = True
+    if not changed:
+        return current
+    return pl.from_dicts(rows, schema=current.schema, strict=False).select(current.columns)
 
 
 def merge_article_archive(
@@ -55,6 +116,7 @@ def merge_article_archive(
         keep="last",
         maintain_order=True,
     )
+    current_unique = _preserve_title_enrichment(existing, current_unique)
     current_ids = current_unique.select(KEY_COLUMN)
     existing_ids = existing.select(KEY_COLUMN).unique()
     updated_rows = current_ids.join(existing_ids, on=KEY_COLUMN, how="inner").height

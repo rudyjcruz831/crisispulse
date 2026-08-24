@@ -1,6 +1,11 @@
 from datetime import datetime
 
-from pipelines.deduplicate import normalized_story_slug, story_group, title_like_path_segment
+from pipelines.deduplicate import (
+    display_headline_from_url,
+    normalized_story_slug,
+    story_group,
+    title_like_path_segment,
+)
 
 
 def test_same_long_slug_in_same_window_groups_across_domains() -> None:
@@ -42,3 +47,41 @@ def test_numeric_article_ids_group_syndicated_copies_by_title() -> None:
     assert story_group(first, seen_at, "flood", "one") == story_group(
         second, seen_at, "flood", "two"
     )
+
+
+def test_display_headline_scans_past_trailing_dates_and_article_ids() -> None:
+    assert display_headline_from_url(
+        "https://www.rediff.com/news/report/uttarakhand-rains-swell-rivers-flood-streets/20260819.htm"
+    ) == "Uttarakhand Rains Swell Rivers Flood Streets"
+    assert display_headline_from_url(
+        "https://timesofindia.indiatimes.com/city/ranchi/incessant-rain-inundates-kolhan-hundreds-of-houses-flooded-one-missing/articleshow/133349970.cms"
+    ) == "Incessant Rain Inundates Kolhan Hundreds of Houses Flooded One Missing"
+    assert display_headline_from_url(
+        "https://www.local3news.com/local-news/update-whitfield-co-firefighters-put-new-rescue-boats-to-the-test/article_54bf1eb7-5a48-4209-9cad-341913dfe371.html"
+    ) == "Update Whitfield Co Firefighters Put New Rescue Boats to the Test"
+
+
+def test_display_headline_removes_embedded_dates_ids_and_punctuation() -> None:
+    assert display_headline_from_url(
+        "https://www.london-now.co.uk/news/national/26471089.heavy-rain-bring-threat-floods-another-hosepipe-ban-announced"
+    ) == "Heavy Rain Bring Threat Floods Another Hosepipe Ban Announced"
+    assert display_headline_from_url(
+        "https://wtkg.iheart.com/content/2026-08-17-tropical-storm-lala-moves-on-after-hawaii-devastation"
+    ) == "Tropical Storm Lala Moves on After Hawaii Devastation"
+    assert display_headline_from_url(
+        "https://aninews.in/news/national/general-news/over-53-lakh-jobs-delivered-1-crore-target-set-for-next-5-years-bihar-cm-samrat-choudhary20260821224832"
+    ) == "Over 53 Lakh Jobs Delivered 1 Crore Target Set for Next 5 Years Bihar CM Samrat Choudhary"
+
+
+def test_display_headline_rejects_routes_without_a_real_headline() -> None:
+    assert display_headline_from_url("https://allafrica.com/stories/202608180433.html") is None
+    assert display_headline_from_url("https://kajn.com/8-19-26") is None
+    assert display_headline_from_url(
+        "https://procurement-notices.undp.org/view_negotiation.cfm?nego_id=48864"
+    ) is None
+    assert display_headline_from_url(
+        "https://taylorvilledailynews.com/local-news/srn-us-news/ac1e47550761973405c4a093205b8dcf"
+    ) is None
+    assert display_headline_from_url(
+        "https://example.com/middle-east/article-906258"
+    ) is None

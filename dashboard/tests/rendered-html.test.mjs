@@ -60,7 +60,7 @@ test("server-renders the CrisisPulse evidence dashboard", async () => {
   assert.doesNotMatch(html, /codex-preview|SkeletonPreview|react-loading-skeleton/i);
 });
 
-test("server-renders the read-only admin operations page", async () => {
+test("server-renders the admin operations and quality page", async () => {
   const response = await render("/admin");
   assert.equal(response.status, 200);
   const html = await response.text();
@@ -69,14 +69,17 @@ test("server-renders the read-only admin operations page", async () => {
   assert.match(html, /Know what is working before customers do/);
   assert.match(html, /Paid pilot readiness/);
   assert.match(html, /Open clocks and model benchmark/);
-  assert.match(html, /Read-only by design/);
+  assert.match(html, /Review real examples—even when there are no alerts/);
+  assert.match(html, /Judge physical flooding/);
+  assert.match(html, /Safe by design/);
   assert.match(html, /U\.S\. Eastern Time/);
 });
 
 test("removes the disposable starter preview", async () => {
-  const [page, adminPage, layout, packageJson] = await Promise.all([
+  const [page, adminPage, globalStyles, layout, packageJson] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/admin/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
   ]);
@@ -110,12 +113,34 @@ test("removes the disposable starter preview", async () => {
   assert.match(page, /const reviewsURL = "\/api\/v1\/reviews"/);
   assert.match(page, /href="\/admin"/);
   assert.match(adminPage, /\/api\/v1\/admin\/status/);
-  assert.match(adminPage, /\/api\/v1\/reviews\/summary/);
+  assert.match(adminPage, /\/api\/v1\/quality\/articles\/summary/);
+  assert.match(adminPage, /Relevant flood/);
+  assert.match(adminPage, /Not relevant/);
+  assert.match(adminPage, /Publisher-provided title/);
+  assert.match(adminPage, /Manually verified publisher title/);
+  assert.match(adminPage, /Cleaned from publisher URL/);
+  assert.match(adminPage, /No trustworthy title available/);
+  assert.match(adminPage, /balanced daily sample/i);
   assert.match(adminPage, /America\/New_York/);
   assert.match(adminPage, /Raw archive usage/);
   assert.match(adminPage, /raw_storage_limit_bytes/);
   assert.match(adminPage, /Permanent article archive/);
   assert.match(adminPage, /article_archive_bytes/);
+  assert.match(adminPage, /title_backfill_updated_articles/);
+  assert.match(adminPage, /titles added last run/);
+  assert.match(adminPage, /filter\(\(article\) => !article\.decision\)/);
+  assert.match(adminPage, /Show reviewed/);
+  assert.match(adminPage, /Saving this answer/);
+  assert.match(adminPage, /Answer saved/);
+  assert.match(adminPage, /The card was removed from Needs review/);
+  assert.match(adminPage, /const qualitySampleReady = qualitySummary\?\.status === "sample_ready"/);
+  assert.match(adminPage, /qualitySampleReady \? "Balanced minimum reached"/);
+  assert.match(adminPage, /Total minimum reached; strong and blocked labels still need balance/);
+  assert.doesNotMatch(adminPage, /resolvedReviews >= minimumReviews/);
+  assert.match(adminPage, /Today’s review queue has no pending cards/);
+  assert.match(globalStyles, /\.quality-review-notice\.success/);
+  assert.match(globalStyles, /\.quality-review-notice\.error/);
+  assert.match(globalStyles, /\.review-button\.selected:disabled/);
   assert.doesNotMatch(page, /127\.0\.0\.1:8080/);
   assert.match(layout, /CrisisPulse — Flood reporting signals/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);

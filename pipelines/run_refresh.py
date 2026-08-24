@@ -12,8 +12,13 @@ from pathlib import Path
 from typing import Iterator, TextIO
 from urllib.parse import urlparse
 
+from pipelines.backfill_article_titles import (
+    DEFAULT_BATCH_SIZE as DEFAULT_TITLE_BACKFILL_BATCH,
+    backfill_article_titles,
+)
 from pipelines.build_features import build_features
 from pipelines.build_outcomes import build_outcomes
+from pipelines.build_quality_sample import build_quality_sample
 from pipelines.build_review_set import build_review_set
 from pipelines.clean_gkg import clean_files
 from pipelines.download_history import (
@@ -174,9 +179,12 @@ def run_refresh(
     window_intervals: int = 8,
     retention_bytes: int = DEFAULT_RAW_RETENTION_BYTES,
     workers: int = 8,
+    title_backfill_batch: int = DEFAULT_TITLE_BACKFILL_BATCH,
 ) -> dict[str, object]:
     if retention_bytes < 1:
         raise ValueError("retention bytes must be positive")
+    if title_backfill_batch < 1:
+        raise ValueError("title backfill batch must be positive")
     started_at = datetime.now(UTC)
     previous_success = _previous_success(status_path)
     _write_status(
@@ -193,6 +201,7 @@ def run_refresh(
     history_dir = work_dir / "history"
     clean_path = clean_dir / "flood_articles_batch.parquet"
     article_archive_path = history_dir / "flood_articles_archive.parquet"
+    quality_sample_path = dashboard_output.with_name("quality-review-sample.json")
     feature_path = feature_dir / "hourly_region_features.parquet"
     feature_report_path = feature_dir / "hourly_region_report.json"
     history_path = history_dir / "hourly_region_features.parquet"
@@ -225,6 +234,17 @@ def run_refresh(
     # Archival happens before any raw ZIP can be pruned. A failed merge or
     # verification aborts the refresh and leaves every retained raw file intact.
     article_archive_stats = merge_article_archive(clean_path, article_archive_path)
+    title_backfill_stats = backfill_article_titles(
+        article_archive_path,
+        dashboard_output.with_name("publisher-title-cache.json"),
+        history_dir / "article-title-backfill-state.json",
+        batch_size=title_backfill_batch,
+    )
+    quality_sample_stats = build_quality_sample(
+        article_archive_path,
+        quality_sample_path,
+        title_cache_path=dashboard_output.with_name("publisher-title-cache.json"),
+    )
     build_review_set(clean_path, review_dir / "flood_manual_review.csv", size=40)
     build_features(clean_path, feature_path)
     feature_report = build_feature_report(feature_path)
@@ -285,12 +305,20 @@ def run_refresh(
         "archived_articles": article_archive_stats.archive_rows,
         "new_archived_articles": article_archive_stats.new_rows,
         "updated_archived_articles": article_archive_stats.updated_rows,
-        "article_archive_bytes": article_archive_stats.archive_bytes,
+        "article_archive_bytes": title_backfill_stats.archive_bytes,
+        "title_backfill_attempted_articles": title_backfill_stats.attempted_articles,
+        "title_backfill_updated_articles": title_backfill_stats.updated_articles,
+        "title_backfill_invalidated_titles": title_backfill_stats.invalidated_titles,
+        "title_backfill_downgraded_articles": title_backfill_stats.downgraded_articles,
+        "title_backfill_promoted_articles": title_backfill_stats.promoted_articles,
+        "title_backfill_remaining_articles": title_backfill_stats.remaining_without_titles,
+        "quality_sample_articles": quality_sample_stats.sample_articles,
+        "quality_sample_date": quality_sample_stats.sample_date,
         "high_confidence_archived_articles": (
-            article_archive_stats.high_confidence_rows
+            title_backfill_stats.high_confidence_articles
         ),
         "weak_confidence_archived_articles": (
-            article_archive_stats.weak_confidence_rows
+            title_backfill_stats.weak_confidence_articles
         ),
         "url_topic_mismatch_rows": clean_stats.url_topic_mismatch_rows,
         "publisher_title_checked_rows": clean_stats.publisher_title_checked_rows,
@@ -326,6 +354,12 @@ def main() -> None:
         help="maximum raw GDELT ZIP storage in bytes (default: 10 GB)",
     )
     parser.add_argument("--workers", type=int, default=8)
+    parser.add_argument(
+        "--title-backfill-batch",
+        type=int,
+        default=DEFAULT_TITLE_BACKFILL_BATCH,
+        help="maximum archived article titles checked per refresh",
+    )
     args = parser.parse_args()
     try:
         with _refresh_lock(args.status_path.with_suffix(".lock")):
@@ -337,6 +371,7 @@ def main() -> None:
                 window_intervals=args.window_intervals,
                 retention_bytes=args.retention_bytes,
                 workers=args.workers,
+                title_backfill_batch=args.title_backfill_batch,
             )
     except RefreshAlreadyRunning as error:
         print(json.dumps({"status": "skipped", "message": str(error)}))

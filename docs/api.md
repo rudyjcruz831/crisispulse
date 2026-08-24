@@ -16,7 +16,7 @@ Start the API from the repository root:
 powershell -ExecutionPolicy Bypass -File .\scripts\run-api.ps1
 ```
 
-The default address is `http://127.0.0.1:8080`, and the default allowed dashboard origin is `http://localhost:3000`. The API reads `%USERPROFILE%\.crisispulse\dashboard.json`, which the refresh runner replaces after each successful cycle, and appends decisions to `%USERPROFILE%\.crisispulse\reviews.jsonl`. Override these locations with `scripts\run-api.ps1 -DataPath <path> -ReviewPath <path>` when needed.
+The default address is `http://127.0.0.1:8080`, and the default allowed dashboard origin is `http://localhost:3000`. The `--allowed-origin` flag also accepts an exact, comma-separated origin list, which lets the protected `http://localhost:8088` address and the loopback-only `http://localhost:3000` preview submit reviews without allowing arbitrary browser origins. The API reads `%USERPROFILE%\.crisispulse\dashboard.json`, which the refresh runner replaces after each successful cycle, and appends decisions to `%USERPROFILE%\.crisispulse\reviews.jsonl`. Override these locations with `scripts\run-api.ps1 -DataPath <path> -ReviewPath <path>` when needed.
 
 ## Endpoints
 
@@ -30,6 +30,10 @@ The default address is `http://127.0.0.1:8080`, and the default allowed dashboar
 | `POST` | `/api/v1/reviews` | Append a validated review decision to the local audit log. |
 | `GET` | `/api/v1/reviews/summary` | Return label counts and sample-readiness metrics. |
 | `GET` | `/api/v1/reviews/export.csv` | Download the latest decision for each reviewed signal as CSV. |
+| `GET` | `/api/v1/quality/articles` | Return the current balanced daily article sample with any saved decisions. |
+| `POST` | `/api/v1/quality/articles` | Append a validated relevance decision for an article in the current sample. |
+| `GET` | `/api/v1/quality/articles/summary` | Return guarded article-filter quality measurements and review progress. |
+| `GET` | `/api/v1/quality/articles/export.csv` | Download the latest article relevance decision per article as CSV. |
 
 ### Health response
 
@@ -59,6 +63,12 @@ The read-only admin response reports API availability, refresh health, the last 
 ### Review-quality summary
 
 The summary counts only the latest decision for each stable signal ID. `confirmed_event_rate` and `irrelevant_news_rate` remain `null` until at least 20 reviews are resolved as either `confirmed_event` or `irrelevant_news`; `uncertain` labels remain in the dataset but do not count toward that minimum. These rates describe human review outcomes, not externally verified disaster accuracy.
+
+### Article-filter quality
+
+The daily sample contains 24 safe publisher links drawn deterministically from recent permanent history: eight strong matches, eight weak headline conflicts, and eight other ambiguous matches when each group has enough rows. `POST` accepts only `relevant`, `not_relevant`, or `uncertain` for an article in the current sample. The API copies the system classification from the server-side sample rather than trusting browser-supplied metadata.
+
+Strong-match relevance and weak-match relevance remain `null` until at least 20 decisions are resolved and both the strong and blocked strata contain at least five resolved reviews. The sample is deliberately balanced, so its combined relevant/not-relevant ratio is not an estimate of production prevalence or overall accuracy.
 
 ### Signals response
 
