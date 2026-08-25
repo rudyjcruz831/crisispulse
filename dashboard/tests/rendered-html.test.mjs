@@ -75,7 +75,14 @@ test("server-renders the admin operations and quality page", async () => {
   assert.match(html, /Progress unavailable/);
   assert.match(html, /Open clocks and model benchmark/);
   assert.match(html, /Review real examples—even when there are no alerts/);
-  assert.match(html, /Judge physical flooding/);
+  assert.match(html, /Separate the event from the risk/);
+  assert.match(html, /Training-label breakdown/);
+  assert.match(html, /Flooding reported/);
+  assert.match(html, /Flood risk \/ warning/);
+  assert.match(html, /Heavy rain only/);
+  assert.match(html, /Not flood-related/);
+  assert.match(html, /Cannot determine/);
+  assert.match(html, /reported flooding takes precedence over risk or warning/i);
   assert.match(html, /Safe by design/);
   assert.match(html, /U\.S\. Eastern Time/);
 });
@@ -103,6 +110,11 @@ test("server-renders the saved Spanish language without an English first paint",
   assert.match(dashboardHTML, /Monitor global de reportes de inundaciones/i);
   assert.doesNotMatch(dashboardHTML, /Global flood reporting monitor/i);
   assert.match(adminHTML, /<title>Administración de CrisisPulse — Consola de operaciones<\/title>/i);
+  assert.match(adminHTML, /Inundación reportada/);
+  assert.match(adminHTML, /Riesgo o alerta de inundación/);
+  assert.match(adminHTML, /Solo lluvia intensa/);
+  assert.match(adminHTML, /No relacionado con inundaciones/);
+  assert.match(adminHTML, /No se puede determinar/);
   assert.doesNotMatch(adminHTML, /Know what is working before customers do/i);
 });
 
@@ -123,6 +135,13 @@ test("removes the disposable starter preview", async () => {
   assert.match(page, /Real event/);
   assert.match(page, /Irrelevant news/);
   assert.match(page, /Uncertain/);
+  const mainReviewOptions = page.match(/const reviewOptions:[\s\S]*?= \[([\s\S]*?)\n\s*\];/)?.[1];
+  assert.ok(mainReviewOptions, "main dashboard review options should be present");
+  assert.deepEqual(
+    [...mainReviewOptions.matchAll(/value:\s*"([^"]+)"/g)].map((match) => match[1]),
+    ["confirmed_event", "irrelevant_news", "uncertain"],
+    "main dashboard signal review must remain a separate three-way taxonomy",
+  );
   assert.match(page, /Direct publisher evidence/);
   assert.match(page, /Multi-source coverage/);
   assert.match(page, /Read publisher report/);
@@ -177,8 +196,50 @@ test("removes the disposable starter preview", async () => {
   assert.match(adminPage, /It does not publish the site or grant public access/);
   assert.doesNotMatch(adminPage, /customer-ready/i);
   assert.match(adminPage, /\/api\/v1\/quality\/articles\/summary/);
-  assert.match(adminPage, /Relevant flood/);
-  assert.match(adminPage, /Not relevant/);
+  assert.match(adminPage, /Flooding reported/);
+  assert.match(adminPage, /Flood risk \/ warning/);
+  assert.match(adminPage, /Heavy rain only/);
+  assert.match(adminPage, /Not flood-related/);
+  assert.match(adminPage, /Cannot determine/);
+  assert.match(adminPage, /Inundación reportada/);
+  assert.match(adminPage, /Riesgo o alerta de inundación/);
+  assert.match(adminPage, /Solo lluvia intensa/);
+  assert.match(adminPage, /No relacionado con inundaciones/);
+  assert.match(adminPage, /No se puede determinar/);
+  assert.match(adminPage, /Optional context tags/);
+  assert.match(adminPage, /<details className="article-context-tags">/);
+  assert.match(adminPage, /<summary>/);
+  assert.match(adminPage, /Etiquetas de contexto opcionales/);
+  assert.match(adminPage, /do not replace the primary label or control alerts/);
+  assert.match(adminPage, /no sustituyen la etiqueta principal ni controlan las alertas/);
+  assert.match(adminPage, /lowercase words joined by hyphens, up to 32 characters each/);
+  assert.match(adminPage, /palabras en minúsculas unidas por guiones, con un máximo de 32 caracteres/);
+  assert.match(adminPage, /select its highlighted primary label again to save a correction/);
+  assert.match(adminPage, /seleccione de nuevo su etiqueta principal resaltada para guardar una corrección/);
+  const contextTagSuggestions = adminPage.match(/const articleContextTagSuggestions:[\s\S]*?= \[([\s\S]*?)\n\];/)?.[1];
+  assert.ok(contextTagSuggestions, "article context-tag suggestions should be present");
+  assert.deepEqual(
+    [...contextTagSuggestions.matchAll(/value:\s*"([^"]+)"/g)].map((match) => match[1]),
+    ["fatality", "heavy-rain", "flood-damage", "evacuation", "rescue", "cleanup", "infrastructure", "storm-impact"],
+    "suggested article context tags must keep stable stored slugs",
+  );
+  assert.match(adminPage, /const maxArticleContextTags = 8/);
+  assert.match(adminPage, /const maxArticleContextTagLength = 32/);
+  assert.match(adminPage, /replace\(\/\[\^\\p\{L\}\\p\{N\}\]\+\/gu, "-"\)/);
+  assert.match(adminPage, /aria-pressed=\{selected\}/);
+  assert.match(adminPage, /htmlFor=\{tagInputID\}/);
+  assert.match(adminPage, /onSubmit=\{\(event\) =>/);
+  assert.match(adminPage, /removeArticleTag\(article, tag\)/);
+  assert.match(adminPage, /body: JSON\.stringify\(\{ article_id: article\.article_id, decision, tags \}\)/);
+  assert.match(adminPage, /const savedTags = normalizeArticleContextTags\(payload\.review\.tags\)/);
+  assert.match(adminPage, /decision_schema_version/);
+  assert.match(adminPage, /reported_flooding_articles/);
+  assert.match(adminPage, /flood_risk_warning_articles/);
+  assert.match(adminPage, /heavy_rain_only_articles/);
+  assert.match(adminPage, /not_flood_related_articles/);
+  assert.match(adminPage, /legacy_reviews/);
+  assert.match(adminPage, /high_match_flood_related_rate/);
+  assert.match(adminPage, /weak_match_flood_related_rate/);
   assert.match(adminPage, /Publisher-provided title/);
   assert.match(adminPage, /Manually verified publisher title/);
   assert.match(adminPage, /Cleaned from publisher URL/);
@@ -193,7 +254,14 @@ test("removes the disposable starter preview", async () => {
   assert.match(adminPage, /article_archive_bytes/);
   assert.match(adminPage, /title_backfill_updated_articles/);
   assert.match(adminPage, /titles added last run/);
-  assert.match(adminPage, /filter\(\(article\) => !article\.decision\)/);
+  assert.match(adminPage, /filter\(\(article\) => !hasDetailedArticleReview\(article\)\)/);
+  assert.match(adminPage, /Legacy label — re-label required/);
+  assert.match(adminPage, /Training-label counts are temporarily unavailable/);
+  assert.match(adminPage, /qualitySummary === null \? "—"/);
+  assert.match(adminPage, /hasLegacyArticleReview/);
+  assert.match(adminPage, /aria-describedby=\{`article-label-definition-\$\{option\.value\}`\}/);
+  assert.match(adminPage, /aria-pressed=\{activeDecision === option\.value\}/);
+  assert.match(adminPage, /review-selected-check/);
   assert.match(adminPage, /Show reviewed/);
   assert.match(adminPage, /Saving this answer/);
   assert.match(adminPage, /Answer saved/);
@@ -210,6 +278,17 @@ test("removes the disposable starter preview", async () => {
   assert.match(globalStyles, /\.quality-review-notice\.success/);
   assert.match(globalStyles, /\.quality-review-notice\.error/);
   assert.match(globalStyles, /\.review-button\.selected:disabled/);
+  assert.match(globalStyles, /\.article-quality-card \.review-actions \{ grid-template-columns: repeat\(2/);
+  assert.match(globalStyles, /\.article-quality-card \.review-button\.cannot-determine[^}]*grid-column: 1 \/ -1/);
+  assert.match(globalStyles, /\.article-quality-card \.review-button[^}]*min-height: 48px/);
+  assert.match(globalStyles, /\.article-tag-suggestions button[^}]*min-height: 54px/);
+  assert.match(globalStyles, /\.article-context-tags summary[^}]*min-height: 44px/);
+  assert.match(globalStyles, /\.article-context-tags summary:focus-visible[^}]*outline: 3px solid var\(--amber\)/);
+  assert.match(globalStyles, /\.selected-article-tags button[^}]*min-height: 44px[^}]*min-width: 44px/);
+  assert.match(globalStyles, /\.article-custom-tag-form input, \.article-custom-tag-form button[^}]*min-height: 44px/);
+  assert.match(globalStyles, /\.article-tag-suggestions button:focus-visible[^}]*outline: 3px solid var\(--amber\)/);
+  assert.match(globalStyles, /@media \(max-width: 680px\)[\s\S]*?\.article-quality-card \.review-actions \{ grid-template-columns: 1fr; \}/);
+  assert.match(globalStyles, /@media \(max-width: 680px\)[\s\S]*?\.article-tag-suggestions \{ grid-template-columns: 1fr; \}/);
   assert.match(globalStyles, /\.readiness-progress progress/);
   assert.match(globalStyles, /\.readiness-metrics/);
   assert.match(globalStyles, /\.readiness-blockers/);

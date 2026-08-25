@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"encoding/csv"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -11,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 const testQualitySample = `{
@@ -50,7 +53,7 @@ const testQualitySample = `{
   ]
 }`
 
-func testQualityHandler(t *testing.T) http.Handler {
+func testQualityHandlerWithReviewPath(t *testing.T) (http.Handler, string) {
 	t.Helper()
 	root := t.TempDir()
 	dataPath := filepath.Join(root, "dashboard.json")
@@ -60,7 +63,65 @@ func testQualityHandler(t *testing.T) http.Handler {
 	if err := os.WriteFile(filepath.Join(root, "quality-review-sample.json"), []byte(testQualitySample), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	return newHandler(dataPath, filepath.Join(root, "reviews.jsonl"), "http://localhost:3000", log.New(io.Discard, "", 0))
+	reviewPath := filepath.Join(root, "reviews.jsonl")
+	articleReviewPath := filepath.Join(root, "article-reviews.jsonl")
+	return newHandler(dataPath, reviewPath, "http://localhost:3000", log.New(io.Discard, "", 0)), articleReviewPath
+}
+
+func testQualityHandler(t *testing.T) http.Handler {
+	t.Helper()
+	handler, _ := testQualityHandlerWithReviewPath(t)
+	return handler
+}
+
+func postQualityDecision(t *testing.T, handler http.Handler, articleID, decision string) *httptest.ResponseRecorder {
+	t.Helper()
+	return postQualityReview(t, handler, articleID, decision, nil)
+}
+
+func postQualityReview(t *testing.T, handler http.Handler, articleID, decision string, tags []string) *httptest.ResponseRecorder {
+	t.Helper()
+	body, err := json.Marshal(articleReviewRequest{ArticleID: articleID, Decision: decision, Tags: tags})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/quality/articles", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Origin", "http://localhost:3000")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	return response
+}
+
+func TestQualityArticleReviewNormalizesDeduplicatesAndPersistsTags(t *testing.T) {
+	handler := testQualityHandler(t)
+	tags := []string{" Hawaii Rain ", "HAWAII---RAIN", "Woman’s Death", " ÉVACUATION / 東京 "}
+	response := postQualityReview(t, handler, strings.Repeat("0", 64), "reported_flooding", tags)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var result articleReviewResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	wantTags := "hawaii-rain,woman-s-death,évacuation-東京"
+	if got := strings.Join(result.Review.Tags, ","); got != wantTags {
+		t.Fatalf("response tags = %q, want %q", got, wantTags)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/quality/articles", nil)
+	listResponse := httptest.NewRecorder()
+	handler.ServeHTTP(listResponse, request)
+	if listResponse.Code != http.StatusOK {
+		t.Fatalf("list status = %d, body = %s", listResponse.Code, listResponse.Body.String())
+	}
+	var sample qualitySampleFile
+	if err := json.Unmarshal(listResponse.Body.Bytes(), &sample); err != nil {
+		t.Fatal(err)
+	}
+	if len(sample.Articles) == 0 || strings.Join(sample.Articles[0].Tags, ",") != wantTags {
+		t.Fatalf("quality article tags = %#v", sample.Articles)
+	}
 }
 
 func TestQualityArticleReviewFlow(t *testing.T) {
@@ -73,19 +134,14 @@ func TestQualityArticleReviewFlow(t *testing.T) {
 		t.Fatalf("list response = %d %s", listResponse.Code, listResponse.Body.String())
 	}
 
-	body := `{"article_id":"0000000000000000000000000000000000000000000000000000000000000000","decision":"relevant"}`
-	postRequest := httptest.NewRequest(http.MethodPost, "/api/v1/quality/articles", bytes.NewBufferString(body))
-	postRequest.Header.Set("Content-Type", "application/json")
-	postRequest.Header.Set("Origin", "http://localhost:3000")
-	postResponse := httptest.NewRecorder()
-	handler.ServeHTTP(postResponse, postRequest)
-	if postResponse.Code != http.StatusCreated || !strings.Contains(postResponse.Body.String(), `"decision":"relevant"`) {
+	postResponse := postQualityDecision(t, handler, strings.Repeat("0", 64), "reported_flooding")
+	if postResponse.Code != http.StatusCreated || !strings.Contains(postResponse.Body.String(), `"decision":"reported_flooding"`) || !strings.Contains(postResponse.Body.String(), `"decision_schema_version":2`) {
 		t.Fatalf("post response = %d %s", postResponse.Code, postResponse.Body.String())
 	}
 
 	listResponse = httptest.NewRecorder()
 	handler.ServeHTTP(listResponse, listRequest)
-	if !strings.Contains(listResponse.Body.String(), `"decision":"relevant"`) {
+	if !strings.Contains(listResponse.Body.String(), `"decision":"reported_flooding"`) || !strings.Contains(listResponse.Body.String(), `"decision_schema_version":2`) {
 		t.Fatalf("saved review missing from list: %s", listResponse.Body.String())
 	}
 
@@ -96,14 +152,73 @@ func TestQualityArticleReviewFlow(t *testing.T) {
 	if err := json.Unmarshal(summaryResponse.Body.Bytes(), &summary); err != nil {
 		t.Fatal(err)
 	}
-	if summary.ResolvedReviews != 1 || summary.HighRelevant != 1 || summary.Status != "collecting_labels" {
+	if summary.TotalReviews != 1 || summary.ResolvedReviews != 1 || summary.ReportedFloodingArticles != 1 || summary.HighFloodRelated != 1 || summary.Status != "collecting_labels" {
 		t.Fatalf("summary = %+v", summary)
+	}
+}
+
+func TestQualityArticleReviewAcceptsEverySchemaV2Decision(t *testing.T) {
+	decisions := []string{"reported_flooding", "flood_risk_warning", "heavy_rain_only", "not_flood_related", "uncertain"}
+	for _, decision := range decisions {
+		t.Run(decision, func(t *testing.T) {
+			handler := testQualityHandler(t)
+			response := postQualityDecision(t, handler, strings.Repeat("0", 64), decision)
+			if response.Code != http.StatusCreated {
+				t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+			}
+			var result articleReviewResponse
+			if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+				t.Fatal(err)
+			}
+			if result.Review.Decision != decision || result.Review.DecisionSchemaVersion != articleDecisionSchemaV2 {
+				t.Fatalf("review = %+v", result.Review)
+			}
+		})
+	}
+}
+
+func TestQualityArticleReviewRejectsLegacyAndInvalidDecisions(t *testing.T) {
+	for _, decision := range []string{"relevant", "not_relevant", "flood", "", "REPORTED_FLOODING"} {
+		t.Run(decision, func(t *testing.T) {
+			handler := testQualityHandler(t)
+			response := postQualityDecision(t, handler, strings.Repeat("0", 64), decision)
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+			}
+		})
+	}
+}
+
+func TestQualityArticleReviewRejectsInvalidTags(t *testing.T) {
+	nineTags := make([]string, 9)
+	for index := range nineTags {
+		nineTags[index] = fmt.Sprintf("tag-%d", index)
+	}
+	tests := map[string][]string{
+		"no letters or digits": {" -- !!! "},
+		"too many":             nineTags,
+		"too long":             {strings.Repeat("雨", maximumArticleTagRunes+1)},
+	}
+	for name, tags := range tests {
+		t.Run(name, func(t *testing.T) {
+			handler := testQualityHandler(t)
+			response := postQualityReview(t, handler, strings.Repeat("0", 64), "reported_flooding", tags)
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+			}
+		})
+	}
+
+	handler := testQualityHandler(t)
+	response := postQualityReview(t, handler, strings.Repeat("0", 64), "reported_flooding", []string{strings.Repeat("雨", maximumArticleTagRunes)})
+	if response.Code != http.StatusCreated {
+		t.Fatalf("32-code-point Unicode tag status = %d, body = %s", response.Code, response.Body.String())
 	}
 }
 
 func TestQualityReviewRejectsArticleOutsideCurrentSample(t *testing.T) {
 	handler := testQualityHandler(t)
-	body := `{"article_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","decision":"relevant"}`
+	body := `{"article_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","decision":"reported_flooding"}`
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/quality/articles", bytes.NewBufferString(body))
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
@@ -114,26 +229,192 @@ func TestQualityReviewRejectsArticleOutsideCurrentSample(t *testing.T) {
 	}
 }
 
-func TestArticleQualityRatesStayLockedUntilBalancedMinimum(t *testing.T) {
-	reviews := make([]articleReviewRecord, 0, 20)
-	for index := 0; index < 20; index++ {
-		strength := "high"
-		decision := "relevant"
-		if index >= 10 {
-			strength = "weak"
-			if index%2 == 0 {
-				decision = "not_relevant"
-			}
-		}
-		reviews = append(reviews, articleReviewRecord{MatchStrength: strength, Decision: decision})
+func TestArticleReviewStoreLoadsHistoricalSchemaV1WithoutMapping(t *testing.T) {
+	handler, reviewPath := testQualityHandlerWithReviewPath(t)
+	legacyMissingVersion := `{"article_id":"0000000000000000000000000000000000000000000000000000000000000000","title":"Legacy flood label","url":"https://news.example/legacy-flood","source_domain":"news.example","match_strength":"high","review_bucket":"high_match","decision":"relevant","reviewed_at":"2026-08-23T10:00:00Z"}`
+	legacyExplicitVersion := `{"article_id":"1111111111111111111111111111111111111111111111111111111111111111","title":"Legacy negative label","url":"https://news.example/legacy-negative","source_domain":"news.example","match_strength":"weak","review_bucket":"headline_conflict","decision":"not_relevant","decision_schema_version":1,"reviewed_at":"2026-08-23T11:00:00Z"}`
+	legacyUncertain := `{"article_id":"2222222222222222222222222222222222222222222222222222222222222222","title":"Legacy uncertain label","url":"https://news.example/legacy-uncertain","source_domain":"news.example","match_strength":"weak","review_bucket":"ambiguous_match","decision":"uncertain","reviewed_at":"2026-08-23T12:00:00Z"}`
+	if err := os.WriteFile(reviewPath, []byte(legacyMissingVersion+"\n"+legacyExplicitVersion+"\n"+legacyUncertain+"\n"), 0o600); err != nil {
+		t.Fatal(err)
 	}
 
-	locked := summarizeArticleReviews(reviews[:19])
-	ready := summarizeArticleReviews(reviews)
-	if locked.Status != "collecting_labels" || locked.HighMatchPrecision != nil {
-		t.Fatalf("locked summary = %+v", locked)
+	reviews, err := newArticleReviewStore(reviewPath).list()
+	if err != nil {
+		t.Fatal(err)
 	}
-	if ready.Status != "sample_ready" || ready.HighMatchPrecision == nil || *ready.HighMatchPrecision != 1 || ready.WeakMatchRelevantRate == nil || *ready.WeakMatchRelevantRate != 0.5 {
+	if len(reviews) != 3 {
+		t.Fatalf("reviews = %+v", reviews)
+	}
+	decisions := map[string]int{}
+	for _, review := range reviews {
+		if len(review.Tags) != 0 {
+			t.Fatalf("legacy review unexpectedly has tags: %+v", review)
+		}
+		decisions[review.Decision] = review.DecisionSchemaVersion
+	}
+	if decisions["relevant"] != 1 || decisions["not_relevant"] != 1 || decisions["uncertain"] != 1 {
+		t.Fatalf("legacy decisions were not preserved: %+v", reviews)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/quality/articles", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"decision":"relevant","decision_schema_version":1`) {
+		t.Fatalf("legacy decision was not exposed as schema v1: %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestArticleReviewCorrectionAppendsAuditAndLatestIsSchemaV2(t *testing.T) {
+	_, reviewPath := testQualityHandlerWithReviewPath(t)
+	legacy := `{"article_id":"0000000000000000000000000000000000000000000000000000000000000000","title":"Legacy flood label","url":"https://news.example/legacy-flood","source_domain":"news.example","match_strength":"high","review_bucket":"high_match","decision":"relevant","reviewed_at":"2026-08-23T10:00:00Z"}`
+	if err := os.WriteFile(reviewPath, []byte(legacy+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store := newArticleReviewStore(reviewPath)
+	now := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
+	store.now = func() time.Time {
+		current := now
+		now = now.Add(time.Minute)
+		return current
+	}
+	article := qualityArticle{
+		ArticleID:     strings.Repeat("0", 64),
+		Title:         "Corrected flood-risk label",
+		URL:           "https://news.example/legacy-flood",
+		SourceDomain:  "news.example",
+		MatchStrength: "high",
+		ReviewBucket:  "high_match",
+	}
+	if _, err := store.save(article, "flood_risk_warning", []string{"hawaii-rain", "fatality"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.save(article, "reported_flooding", []string{"fatality", "flash-flood"}); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(reviewPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	if len(lines) != 3 || !strings.Contains(lines[0], `"decision":"relevant"`) || !strings.Contains(lines[1], `"tags":["hawaii-rain","fatality"]`) || !strings.Contains(lines[2], `"tags":["fatality","flash-flood"]`) {
+		t.Fatalf("audit log = %s", raw)
+	}
+	reviews, err := store.list()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reviews) != 1 || reviews[0].Decision != "reported_flooding" || reviews[0].DecisionSchemaVersion != 2 || strings.Join(reviews[0].Tags, ",") != "fatality,flash-flood" {
+		t.Fatalf("latest reviews = %+v", reviews)
+	}
+}
+
+func TestStoredArticleReviewRequiresCanonicalSchemaV2Tags(t *testing.T) {
+	base := articleReviewRecord{
+		ArticleID:             strings.Repeat("0", 64),
+		Title:                 "Flood closes local road",
+		URL:                   "https://news.example/flood-closes-road",
+		SourceDomain:          "news.example",
+		MatchStrength:         "high",
+		ReviewBucket:          "high_match",
+		Decision:              "reported_flooding",
+		DecisionSchemaVersion: articleDecisionSchemaV2,
+		ReviewedAt:            "2026-08-24T12:00:00Z",
+	}
+	for name, tags := range map[string][]string{
+		"uppercase":   {"Hawaii-Rain"},
+		"separator":   {"hawaii--rain"},
+		"duplicate":   {"hawaii-rain", "hawaii-rain"},
+		"too many":    {"one", "two", "three", "four", "five", "six", "seven", "eight", "nine"},
+		"too long":    {strings.Repeat("a", maximumArticleTagRunes+1)},
+		"empty value": {""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			record := base
+			record.Tags = tags
+			if err := validateStoredArticleReview(record); err == nil {
+				t.Fatalf("tags %#v were accepted", tags)
+			}
+		})
+	}
+
+	base.Tags = []string{"hawaii-rain", "fatality"}
+	if err := validateStoredArticleReview(base); err != nil {
+		t.Fatalf("canonical v2 tags rejected: %v", err)
+	}
+	base.DecisionSchemaVersion = 1
+	base.Decision = "relevant"
+	if err := validateStoredArticleReview(base); err == nil {
+		t.Fatal("schema v1 review with tags was accepted")
+	}
+}
+
+func TestArticleQualitySummaryUsesOnlyResolvedSchemaV2ForReadiness(t *testing.T) {
+	reviews := make([]articleReviewRecord, 0, 24)
+	highDecisions := []string{"reported_flooding", "reported_flooding", "reported_flooding", "reported_flooding", "reported_flooding", "reported_flooding", "flood_risk_warning", "heavy_rain_only", "heavy_rain_only", "not_flood_related"}
+	weakDecisions := []string{"reported_flooding", "flood_risk_warning", "flood_risk_warning", "heavy_rain_only", "heavy_rain_only", "heavy_rain_only", "not_flood_related", "not_flood_related", "not_flood_related", "not_flood_related"}
+	for _, decision := range highDecisions {
+		reviews = append(reviews, articleReviewRecord{DecisionSchemaVersion: 2, MatchStrength: "high", Decision: decision})
+	}
+	for _, decision := range weakDecisions {
+		reviews = append(reviews, articleReviewRecord{DecisionSchemaVersion: 2, MatchStrength: "weak", Decision: decision})
+	}
+	reviews = append(reviews,
+		articleReviewRecord{DecisionSchemaVersion: 2, MatchStrength: "high", Decision: "uncertain"},
+		articleReviewRecord{DecisionSchemaVersion: 1, MatchStrength: "high", Decision: "relevant"},
+		articleReviewRecord{DecisionSchemaVersion: 1, MatchStrength: "weak", Decision: "not_relevant"},
+		articleReviewRecord{MatchStrength: "weak", Decision: "uncertain"},
+	)
+
+	ready := summarizeArticleReviews(reviews)
+	if ready.TotalReviews != 24 || ready.LegacyReviews != 3 || ready.Uncertain != 1 || ready.ResolvedReviews != 20 || ready.RemainingToSample != 0 {
+		t.Fatalf("summary totals = %+v", ready)
+	}
+	if ready.ReportedFloodingArticles != 7 || ready.FloodRiskWarningArticles != 3 || ready.HeavyRainOnlyArticles != 5 || ready.NotFloodRelatedArticles != 5 {
+		t.Fatalf("decision counts = %+v", ready)
+	}
+	if ready.HighResolved != 10 || ready.HighFloodRelated != 7 || ready.WeakResolved != 10 || ready.WeakFloodRelated != 3 {
+		t.Fatalf("stratum counts = %+v", ready)
+	}
+	if ready.Status != "sample_ready" || ready.HighMatchFloodRelatedRate == nil || *ready.HighMatchFloodRelatedRate != 0.7 || ready.WeakMatchFloodRelatedRate == nil || *ready.WeakMatchFloodRelatedRate != 0.3 {
 		t.Fatalf("ready summary = %+v", ready)
+	}
+
+	belowOverallMinimum := summarizeArticleReviews(reviews[:19])
+	if belowOverallMinimum.Status != "collecting_labels" || belowOverallMinimum.RemainingToSample != 1 || belowOverallMinimum.HighMatchFloodRelatedRate != nil || belowOverallMinimum.WeakMatchFloodRelatedRate != nil {
+		t.Fatalf("below-minimum summary = %+v", belowOverallMinimum)
+	}
+
+	unbalanced := make([]articleReviewRecord, 0, 20)
+	for index := 0; index < 20; index++ {
+		strength := "high"
+		if index >= 16 {
+			strength = "weak"
+		}
+		unbalanced = append(unbalanced, articleReviewRecord{DecisionSchemaVersion: 2, MatchStrength: strength, Decision: "reported_flooding"})
+	}
+	if summary := summarizeArticleReviews(unbalanced); summary.ResolvedReviews != 20 || summary.WeakResolved != 4 || summary.Status != "collecting_labels" || summary.HighMatchFloodRelatedRate != nil {
+		t.Fatalf("unbalanced summary = %+v", summary)
+	}
+}
+
+func TestArticleQualityCSVExportIncludesDecisionSchemaVersion(t *testing.T) {
+	handler := testQualityHandler(t)
+	response := postQualityReview(t, handler, strings.Repeat("0", 64), "heavy_rain_only", []string{"Storm Damage", "Hawaii/Flood"})
+	if response.Code != http.StatusCreated {
+		t.Fatalf("post status = %d, body = %s", response.Code, response.Body.String())
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/quality/articles/export.csv", nil)
+	export := httptest.NewRecorder()
+	handler.ServeHTTP(export, request)
+	if export.Code != http.StatusOK {
+		t.Fatalf("export status = %d, body = %s", export.Code, export.Body.String())
+	}
+	rows, err := csv.NewReader(export.Body).ReadAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 || len(rows[0]) != 10 || rows[0][7] != "decision_schema_version" || rows[0][9] != "tags" || rows[1][6] != "heavy_rain_only" || rows[1][7] != "2" || rows[1][9] != "storm-damage|hawaii-flood" {
+		t.Fatalf("CSV rows = %#v", rows)
 	}
 }

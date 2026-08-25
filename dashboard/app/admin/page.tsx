@@ -171,35 +171,74 @@ const messages = defineMessages({
   resolvedProgress: "Resolved article-review progress",
   balancedMinimum: "Balanced strong and blocked minimum reached.",
   totalMinimumBalance: "Total minimum reached; strong and blocked labels still need balance.",
-  decisionsRemaining: "{count} more relevant or not-relevant decisions needed, balanced across strong and blocked matches.",
-  oneDecisionRemaining: "1 more relevant or not-relevant decision needed, balanced across strong and blocked matches.",
-  strongMatchRelevance: "Strong-match relevance",
+  decisionsRemaining: "{count} more resolved version-2 decisions needed, balanced across strong and blocked matches.",
+  oneDecisionRemaining: "1 more resolved version-2 decision needed, balanced across strong and blocked matches.",
+  strongMatchRelevance: "Flood-related among strong matches",
   strongResolved: "{count} strong matches resolved",
   oneStrongResolved: "1 strong match resolved",
-  blockedRelevance: "Relevant among blocked",
+  blockedRelevance: "Flood-related among blocked",
   blockedResolved: "{count} blocked matches resolved",
   oneBlockedResolved: "1 blocked match resolved",
   qualityCaveat: "Because this sample is deliberately balanced, these are separate filter checks—not an overall accuracy claim.",
   reviewGuide: "How to review an article",
   openPublisher: "Open the publisher story",
   openPublisherHelp: "Use the headline link and read enough to identify the actual subject.",
-  judgeFlooding: "Judge physical flooding",
-  judgeFloodingHelp: "Choose Relevant flood only when the article describes a real flood, flooding, or flood response.",
-  honestUncertainty: "Keep uncertainty honest",
-  honestUncertaintyHelp: "Choose Not relevant for metaphorical or unrelated stories; use Uncertain when the evidence is insufficient.",
+  judgeFlooding: "Separate the event from the risk",
+  judgeFloodingHelp: "Distinguish reported flooding from a flood watch, warning, forecast, or other credible flood risk.",
+  honestUncertainty: "Separate heavy rain from flood evidence",
+  honestUncertaintyHelp: "Use Heavy rain only when rain is severe but the story provides no flooding or flood-risk evidence.",
+  trainingLabelBreakdown: "Training-label breakdown",
+  trainingLabelHelp: "These five counts show exactly what the current version-2 reviews can teach a future model.",
+  trainingCountsUnavailable: "Training-label counts are temporarily unavailable. Refresh the live status before interpreting these totals.",
+  labelPrecedence: "Choose the first label supported by the article: reported flooding takes precedence over risk or warning; risk or warning takes precedence over heavy rain. Use Not flood-related only when none apply, and Cannot determine only when the evidence is insufficient.",
+  floodingReported: "Flooding reported",
+  floodingReportedDefinition: "The article reports flooding that is happening or has happened.",
+  floodRiskWarning: "Flood risk / warning",
+  floodRiskWarningDefinition: "The article contains a flood watch, warning, forecast, or credible flood risk before flooding is confirmed.",
+  heavyRainOnly: "Heavy rain only",
+  heavyRainOnlyDefinition: "The article reports heavy rain or severe weather but gives no flood watch, warning, risk, or flooding evidence.",
+  notFloodRelated: "Not flood-related",
+  notFloodRelatedDefinition: "The article’s subject is unrelated to flooding, flood risk, or heavy rain.",
+  cannotDetermine: "Cannot determine",
+  cannotDetermineDefinition: "The available article evidence is too limited or conflicting to choose another label.",
+  contextTags: "Optional context tags",
+  contextTagsHelp: "Add up to 8 details that describe the story. They help prepare future training data; they do not replace the primary label or control alerts.",
+  suggestedContextTags: "Suggested details",
+  customContextTag: "Add your own detail",
+  customContextTagPlaceholder: "Example: public-safety",
+  addContextTag: "Add",
+  contextTagLimit: "You can add up to 8 context tags.",
+  contextTagFormat: "Custom tags use lowercase words joined by hyphens, up to 32 characters each.",
+  contextTagSaveHelp: "Tags are saved only when you choose a primary label. To update tags on a reviewed article, select its highlighted primary label again to save a correction.",
+  removeContextTag: "Remove {tag}",
+  fatalityTag: "Fatality",
+  fatalityTagHelp: "A death is reported.",
+  heavyRainTag: "Heavy rain",
+  heavyRainTagHelp: "Intense rainfall is part of the story.",
+  floodDamageTag: "Flood damage",
+  floodDamageTagHelp: "Floodwater damaged homes, property, or land.",
+  evacuationTag: "Evacuation",
+  evacuationTagHelp: "People were told or forced to leave.",
+  rescueTag: "Rescue",
+  rescueTagHelp: "Emergency crews rescued or searched for people.",
+  cleanupTag: "Cleanup",
+  cleanupTagHelp: "Recovery or cleanup work is described.",
+  infrastructureTag: "Infrastructure",
+  infrastructureTagHelp: "Roads, utilities, bridges, or public systems were affected.",
+  stormImpactTag: "Storm impact",
+  stormImpactTagHelp: "The article describes broader effects of a storm.",
+  legacyLabel: "Legacy label — re-label required",
+  oneLegacyExcluded: "1 older label is excluded from these training counts. If it appears in today’s sample, it will require a detailed label.",
+  legacyExcluded: "{count} older labels are excluded from these training counts. Any that appear in today’s sample will require a detailed label.",
   answerSaved: "Answer saved",
   notSaved: "Not saved",
-  relevantFlood: "Relevant flood",
-  notRelevant: "Not relevant",
-  uncertain: "Uncertain",
-  relevant: "Relevant",
   needsReview: "Needs review",
   savingAnswer: "Saving answer",
   saving: "Saving…",
   noQueueRemaining: "No articles in today’s queue remain.",
   oneQueueRemaining: "1 article still needs review.",
   manyQueueRemaining: "{count} articles still need review.",
-  savedUncertain: "Saved as {decision}. It moved to Reviewed, but uncertain answers do not count toward the 20 resolved labels. {remaining}",
+  savedUncertain: "Saved as {decision}. It moved to Reviewed, but Cannot determine does not count toward the 20 resolved labels. {remaining}",
   savedResolved: "Saved as {decision}. The card was removed from Needs review. {remaining}",
   sampleChanged: "This daily sample changed before the answer was saved. The list is refreshing; please choose again.",
   saveFailed: "This answer was not saved. Please try again; if it continues, select Check now to confirm the local service is connected.",
@@ -402,35 +441,74 @@ const messages = defineMessages({
   resolvedProgress: "Progreso de revisión de artículos resueltos",
   balancedMinimum: "Se alcanzó el mínimo equilibrado de coincidencias fuertes y bloqueadas.",
   totalMinimumBalance: "Se alcanzó el mínimo total; aún hay que equilibrar las etiquetas fuertes y bloqueadas.",
-  decisionsRemaining: "Faltan {count} decisiones de relevante o no relevante, equilibradas entre coincidencias fuertes y bloqueadas.",
-  oneDecisionRemaining: "Falta 1 decisión de relevante o no relevante, equilibrada entre coincidencias fuertes y bloqueadas.",
-  strongMatchRelevance: "Relevancia de coincidencias fuertes",
+  decisionsRemaining: "Faltan {count} decisiones resueltas de la versión 2, equilibradas entre coincidencias fuertes y bloqueadas.",
+  oneDecisionRemaining: "Falta 1 decisión resuelta de la versión 2, equilibrada entre coincidencias fuertes y bloqueadas.",
+  strongMatchRelevance: "Relacionadas con inundaciones entre coincidencias fuertes",
   strongResolved: "{count} coincidencias fuertes resueltas",
   oneStrongResolved: "1 coincidencia fuerte resuelta",
-  blockedRelevance: "Relevantes entre las bloqueadas",
+  blockedRelevance: "Relacionadas con inundaciones entre las bloqueadas",
   blockedResolved: "{count} coincidencias bloqueadas resueltas",
   oneBlockedResolved: "1 coincidencia bloqueada resuelta",
   qualityCaveat: "Como esta muestra está equilibrada deliberadamente, estas son comprobaciones separadas del filtro, no una afirmación de exactitud general.",
   reviewGuide: "Cómo revisar un artículo",
   openPublisher: "Abrir la historia del editor",
   openPublisherHelp: "Use el enlace del titular y lea lo suficiente para identificar el tema real.",
-  judgeFlooding: "Evaluar la inundación física",
-  judgeFloodingHelp: "Elija Inundación relevante solo cuando el artículo describa una inundación real o su respuesta.",
-  honestUncertainty: "Mantener la incertidumbre honesta",
-  honestUncertaintyHelp: "Elija No relevante para historias metafóricas o no relacionadas; use Dudoso cuando la evidencia sea insuficiente.",
+  judgeFlooding: "Separar el evento del riesgo",
+  judgeFloodingHelp: "Distinga una inundación reportada de una vigilancia, alerta, pronóstico u otro riesgo creíble de inundación.",
+  honestUncertainty: "Separar la lluvia intensa de la evidencia de inundación",
+  honestUncertaintyHelp: "Use Solo lluvia intensa cuando la lluvia sea severa, pero la historia no aporte evidencia de inundación ni de riesgo de inundación.",
+  trainingLabelBreakdown: "Desglose de etiquetas de entrenamiento",
+  trainingLabelHelp: "Estos cinco conteos muestran exactamente qué pueden enseñar las revisiones actuales de la versión 2 a un modelo futuro.",
+  trainingCountsUnavailable: "Los conteos de etiquetas de entrenamiento no están disponibles temporalmente. Actualice el estado en vivo antes de interpretar estos totales.",
+  labelPrecedence: "Elija la primera etiqueta respaldada por el artículo: una inundación reportada tiene prioridad sobre un riesgo o alerta; un riesgo o alerta tiene prioridad sobre la lluvia intensa. Use No relacionado con inundaciones solo cuando ninguna se aplique y No se puede determinar solo cuando la evidencia sea insuficiente.",
+  floodingReported: "Inundación reportada",
+  floodingReportedDefinition: "El artículo informa de una inundación que está ocurriendo o ya ocurrió.",
+  floodRiskWarning: "Riesgo o alerta de inundación",
+  floodRiskWarningDefinition: "El artículo contiene una vigilancia, alerta, pronóstico o riesgo creíble de inundación antes de que se confirme una inundación.",
+  heavyRainOnly: "Solo lluvia intensa",
+  heavyRainOnlyDefinition: "El artículo informa de lluvia intensa o tiempo severo, pero no aporta una vigilancia, alerta, riesgo ni evidencia de inundación.",
+  notFloodRelated: "No relacionado con inundaciones",
+  notFloodRelatedDefinition: "El tema del artículo no está relacionado con inundaciones, riesgo de inundación ni lluvia intensa.",
+  cannotDetermine: "No se puede determinar",
+  cannotDetermineDefinition: "La evidencia disponible del artículo es demasiado limitada o contradictoria para elegir otra etiqueta.",
+  contextTags: "Etiquetas de contexto opcionales",
+  contextTagsHelp: "Añada hasta 8 detalles que describan la historia. Ayudan a preparar futuros datos de entrenamiento; no sustituyen la etiqueta principal ni controlan las alertas.",
+  suggestedContextTags: "Detalles sugeridos",
+  customContextTag: "Añadir un detalle propio",
+  customContextTagPlaceholder: "Ejemplo: seguridad-pública",
+  addContextTag: "Añadir",
+  contextTagLimit: "Puede añadir hasta 8 etiquetas de contexto.",
+  contextTagFormat: "Las etiquetas propias usan palabras en minúsculas unidas por guiones, con un máximo de 32 caracteres cada una.",
+  contextTagSaveHelp: "Las etiquetas se guardan solo al elegir una etiqueta principal. Para actualizar las etiquetas de un artículo revisado, seleccione de nuevo su etiqueta principal resaltada para guardar una corrección.",
+  removeContextTag: "Quitar {tag}",
+  fatalityTag: "Fallecimiento",
+  fatalityTagHelp: "Se informa de una muerte.",
+  heavyRainTag: "Lluvia intensa",
+  heavyRainTagHelp: "La lluvia intensa forma parte de la historia.",
+  floodDamageTag: "Daños por inundación",
+  floodDamageTagHelp: "El agua dañó viviendas, propiedades o terrenos.",
+  evacuationTag: "Evacuación",
+  evacuationTagHelp: "Se pidió u obligó a personas a abandonar el lugar.",
+  rescueTag: "Rescate",
+  rescueTagHelp: "Los equipos de emergencia rescataron o buscaron personas.",
+  cleanupTag: "Limpieza",
+  cleanupTagHelp: "Se describen trabajos de recuperación o limpieza.",
+  infrastructureTag: "Infraestructura",
+  infrastructureTagHelp: "Se afectaron carreteras, servicios, puentes o sistemas públicos.",
+  stormImpactTag: "Impacto de la tormenta",
+  stormImpactTagHelp: "El artículo describe efectos más amplios de una tormenta.",
+  legacyLabel: "Etiqueta anterior — requiere volver a etiquetar",
+  oneLegacyExcluded: "1 etiqueta anterior está excluida de estos conteos de entrenamiento. Si aparece en la muestra de hoy, requerirá una etiqueta detallada.",
+  legacyExcluded: "{count} etiquetas anteriores están excluidas de estos conteos de entrenamiento. Las que aparezcan en la muestra de hoy requerirán una etiqueta detallada.",
   answerSaved: "Respuesta guardada",
   notSaved: "No se guardó",
-  relevantFlood: "Inundación relevante",
-  notRelevant: "No relevante",
-  uncertain: "Dudoso",
-  relevant: "Relevante",
   needsReview: "Necesita revisión",
   savingAnswer: "Guardando respuesta",
   saving: "Guardando…",
   noQueueRemaining: "No quedan artículos en la cola de hoy.",
   oneQueueRemaining: "1 artículo aún necesita revisión.",
   manyQueueRemaining: "{count} artículos aún necesitan revisión.",
-  savedUncertain: "Guardado como {decision}. Pasó a Revisados, pero las respuestas dudosas no cuentan para las 20 etiquetas resueltas. {remaining}",
+  savedUncertain: "Guardado como {decision}. Pasó a Revisados, pero No se puede determinar no cuenta para las 20 etiquetas resueltas. {remaining}",
   savedResolved: "Guardado como {decision}. La tarjeta se eliminó de Necesita revisión. {remaining}",
   sampleChanged: "La muestra diaria cambió antes de guardar la respuesta. La lista se está actualizando; elija de nuevo.",
   saveFailed: "Esta respuesta no se guardó. Inténtelo de nuevo; si continúa, seleccione Comprobar ahora para confirmar que el servicio local está conectado.",
@@ -470,7 +548,9 @@ const messages = defineMessages({
 });
 
 type DashboardData = typeof bundledDashboardData;
-type ArticleDecision = "relevant" | "not_relevant" | "uncertain";
+type ArticleDecision = "reported_flooding" | "flood_risk_warning" | "heavy_rain_only" | "not_flood_related" | "uncertain";
+type LegacyArticleDecision = "relevant" | "not_relevant";
+type QualityArticleDecision = ArticleDecision | LegacyArticleDecision;
 type QualityArticle = {
   article_id: string;
   seen_at: string;
@@ -484,7 +564,9 @@ type QualityArticle = {
   review_reason: string;
   themes: string[];
   quality_flags: string[];
-  decision?: ArticleDecision;
+  tags?: string[];
+  decision?: QualityArticleDecision;
+  decision_schema_version?: number;
   reviewed_at?: string;
 };
 type QualitySample = {
@@ -496,25 +578,30 @@ type QualitySample = {
 };
 type ArticleQualitySummary = {
   total_reviews: number;
-  relevant_articles: number;
-  not_relevant_articles: number;
+  legacy_reviews: number;
+  reported_flooding_articles: number;
+  flood_risk_warning_articles: number;
+  heavy_rain_only_articles: number;
+  not_flood_related_articles: number;
   uncertain: number;
   resolved_reviews: number;
   minimum_sample: number;
   remaining_to_sample: number;
   high_resolved: number;
-  high_relevant: number;
+  high_flood_related: number;
   weak_resolved: number;
-  weak_relevant: number;
-  high_match_precision: number | null;
-  weak_match_relevant_rate: number | null;
+  weak_flood_related: number;
+  high_match_flood_related_rate: number | null;
+  weak_match_flood_related_rate: number | null;
   status: "collecting_labels" | "sample_ready";
 };
 type ArticleReviewResponse = {
   review: {
     article_id: string;
     decision: ArticleDecision;
+    decision_schema_version: 2;
     reviewed_at: string;
+    tags?: string[];
   };
 };
 type SavingArticleReview = {
@@ -654,11 +741,101 @@ const safeCount = (value: number | null | undefined) =>
 const qualityArticlesURL = "/api/v1/quality/articles";
 const qualitySummaryURL = "/api/v1/quality/articles/summary";
 const qualityExportURL = "/api/v1/quality/articles/export.csv";
-const articleReviewOptions: Array<{ value: ArticleDecision; labelKey: MessageKey; tone: string }> = [
-  { value: "relevant", labelKey: "relevantFlood", tone: "confirmed" },
-  { value: "not_relevant", labelKey: "notRelevant", tone: "irrelevant" },
-  { value: "uncertain", labelKey: "uncertain", tone: "uncertain" },
+type ArticleReviewOption = {
+  value: ArticleDecision;
+  labelKey: MessageKey;
+  definitionKey: MessageKey;
+  countField: "reported_flooding_articles" | "flood_risk_warning_articles" | "heavy_rain_only_articles" | "not_flood_related_articles" | "uncertain";
+  tone: string;
+  resolved: boolean;
+};
+const articleReviewOptions: ArticleReviewOption[] = [
+  { value: "reported_flooding", labelKey: "floodingReported", definitionKey: "floodingReportedDefinition", countField: "reported_flooding_articles", tone: "reported-flooding", resolved: true },
+  { value: "flood_risk_warning", labelKey: "floodRiskWarning", definitionKey: "floodRiskWarningDefinition", countField: "flood_risk_warning_articles", tone: "flood-risk-warning", resolved: true },
+  { value: "heavy_rain_only", labelKey: "heavyRainOnly", definitionKey: "heavyRainOnlyDefinition", countField: "heavy_rain_only_articles", tone: "heavy-rain-only", resolved: true },
+  { value: "not_flood_related", labelKey: "notFloodRelated", definitionKey: "notFloodRelatedDefinition", countField: "not_flood_related_articles", tone: "not-flood-related", resolved: true },
+  { value: "uncertain", labelKey: "cannotDetermine", definitionKey: "cannotDetermineDefinition", countField: "uncertain", tone: "cannot-determine", resolved: false },
 ];
+type ArticleContextTagSuggestion = {
+  value: string;
+  labelKey: MessageKey;
+  descriptionKey: MessageKey;
+};
+const maxArticleContextTags = 8;
+const maxArticleContextTagLength = 32;
+const articleContextTagSuggestions: ArticleContextTagSuggestion[] = [
+  { value: "fatality", labelKey: "fatalityTag", descriptionKey: "fatalityTagHelp" },
+  { value: "heavy-rain", labelKey: "heavyRainTag", descriptionKey: "heavyRainTagHelp" },
+  { value: "flood-damage", labelKey: "floodDamageTag", descriptionKey: "floodDamageTagHelp" },
+  { value: "evacuation", labelKey: "evacuationTag", descriptionKey: "evacuationTagHelp" },
+  { value: "rescue", labelKey: "rescueTag", descriptionKey: "rescueTagHelp" },
+  { value: "cleanup", labelKey: "cleanupTag", descriptionKey: "cleanupTagHelp" },
+  { value: "infrastructure", labelKey: "infrastructureTag", descriptionKey: "infrastructureTagHelp" },
+  { value: "storm-impact", labelKey: "stormImpactTag", descriptionKey: "stormImpactTagHelp" },
+];
+const normalizeArticleContextTag = (value: string) => {
+  const slug = value
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, "-")
+    .replace(/^-+|-+$/g, "");
+  return Array.from(slug)
+    .slice(0, maxArticleContextTagLength)
+    .join("")
+    .replace(/-+$/g, "");
+};
+const normalizeArticleContextTags = (values: string[] | undefined) => {
+  const normalized: string[] = [];
+  for (const value of values ?? []) {
+    if (typeof value !== "string") continue;
+    const tag = normalizeArticleContextTag(value);
+    if (!tag || normalized.includes(tag)) continue;
+    normalized.push(tag);
+    if (normalized.length === maxArticleContextTags) break;
+  }
+  return normalized;
+};
+const contextTagSuggestionByValue = new Map(
+  articleContextTagSuggestions.map((suggestion) => [suggestion.value, suggestion]),
+);
+const articleDecisionValues = new Set<ArticleDecision>(articleReviewOptions.map((option) => option.value));
+const getArticleReviewOption = (decision: QualityArticleDecision | undefined) => (
+  decision && articleDecisionValues.has(decision as ArticleDecision)
+    ? articleReviewOptions.find((option) => option.value === decision) ?? null
+    : null
+);
+const getDetailedArticleDecision = (article: QualityArticle) => (
+  article.decision_schema_version === 2
+    ? getArticleReviewOption(article.decision)?.value
+    : undefined
+);
+const hasDetailedArticleReview = (article: QualityArticle) => Boolean(getDetailedArticleDecision(article));
+const hasLegacyArticleReview = (article: QualityArticle) => Boolean(
+  article.decision && !hasDetailedArticleReview(article),
+);
+const reviewBucketMetadata: Record<QualityArticle["review_bucket"], { labelKey: MessageKey; reasonKey: MessageKey }> = {
+  high_match: { labelKey: "strongMatch", reasonKey: "highMatchReason" },
+  headline_conflict: { labelKey: "headlineConflict", reasonKey: "conflictReason" },
+  ambiguous_match: { labelKey: "ambiguousMatch", reasonKey: "ambiguousReason" },
+};
+const titleSourceMessageKeys: Record<NonNullable<QualityArticle["title_source"]>, MessageKey> = {
+  manual_override: "manualTitle",
+  publisher_metadata: "publisherTitle",
+  url_path: "urlTitle",
+  unavailable: "unavailableTitle",
+};
+const getTitleSourceMessageKey = (source: QualityArticle["title_source"]): MessageKey => (
+  source ? titleSourceMessageKeys[source] : "unrecordedTitle"
+);
+const getArticleDecisionStatus = (
+  article: QualityArticle,
+  isSaving: boolean,
+): { labelKey: MessageKey; tone: string } => {
+  if (isSaving) return { labelKey: "savingAnswer", tone: "saving" };
+  if (hasLegacyArticleReview(article)) return { labelKey: "legacyLabel", tone: "legacy" };
+  const option = getArticleReviewOption(getDetailedArticleDecision(article));
+  if (option) return { labelKey: option.labelKey, tone: option.tone };
+  return { labelKey: "needsReview", tone: "pending" };
+};
 const safeArticleURL = (value: string) => {
   try {
     const parsed = new URL(value);
@@ -705,14 +882,16 @@ export default function AdminPage() {
   const [savingArticleReview, setSavingArticleReview] = useState<SavingArticleReview | null>(null);
   const [qualityNotice, setQualityNotice] = useState<QualityNotice | null>(null);
   const [showReviewedArticles, setShowReviewedArticles] = useState(false);
+  const [articleTagDrafts, setArticleTagDrafts] = useState<Record<string, string[]>>({});
+  const [articleTagInputs, setArticleTagInputs] = useState<Record<string, string>>({});
   const requestInFlight = useRef(false);
   const reviewRequestInFlight = useRef(false);
   const focusAfterReview = useRef(false);
   const qualityGridRef = useRef<HTMLDivElement>(null);
   const qualityNoticeRef = useRef<HTMLParagraphElement>(null);
   const { snapshot, forecast } = dashboardData;
-  const pendingQualityArticles = qualitySample?.articles.filter((article) => !article.decision) ?? [];
-  const reviewedQualityArticles = qualitySample?.articles.filter((article) => Boolean(article.decision)) ?? [];
+  const pendingQualityArticles = qualitySample?.articles.filter((article) => !hasDetailedArticleReview(article)) ?? [];
+  const reviewedQualityArticles = qualitySample?.articles.filter(hasDetailedArticleReview) ?? [];
   const visibleQualityArticles = showReviewedArticles
     ? qualitySample?.articles ?? []
     : pendingQualityArticles;
@@ -772,15 +951,15 @@ export default function AdminPage() {
           if (!current) return nextQuality;
           const locallySaved = new Map(
             current.articles
-              .filter((article) => article.decision)
+              .filter(hasDetailedArticleReview)
               .map((article) => [article.article_id, article]),
           );
           return {
             ...nextQuality,
             articles: nextQuality.articles.map((article) => {
               const saved = locallySaved.get(article.article_id);
-              return saved?.decision
-                ? { ...article, decision: saved.decision, reviewed_at: saved.reviewed_at }
+              return saved?.decision && saved.decision_schema_version === 2
+                ? { ...article, decision: saved.decision, decision_schema_version: 2, reviewed_at: saved.reviewed_at, tags: saved.tags }
                 : article;
             }),
           };
@@ -829,36 +1008,88 @@ export default function AdminPage() {
     }
   };
 
+  const getArticleTagDraft = (article: QualityArticle) => (
+    articleTagDrafts[article.article_id] ?? normalizeArticleContextTags(article.tags)
+  );
+
+  const addArticleTag = (article: QualityArticle, value: string) => {
+    const tag = normalizeArticleContextTag(value);
+    if (!tag) return;
+    const existingTags = getArticleTagDraft(article);
+    if (existingTags.includes(tag) || existingTags.length >= maxArticleContextTags) return;
+    setArticleTagDrafts((current) => {
+      const currentTags = current[article.article_id] ?? normalizeArticleContextTags(article.tags);
+      if (currentTags.includes(tag) || currentTags.length >= maxArticleContextTags) return current;
+      return { ...current, [article.article_id]: [...currentTags, tag] };
+    });
+    setArticleTagInputs((current) => ({ ...current, [article.article_id]: "" }));
+  };
+
+  const toggleArticleTag = (article: QualityArticle, value: string) => {
+    const tag = normalizeArticleContextTag(value);
+    if (!tag) return;
+    setArticleTagDrafts((current) => {
+      const currentTags = current[article.article_id] ?? normalizeArticleContextTags(article.tags);
+      const nextTags = currentTags.includes(tag)
+        ? currentTags.filter((currentTag) => currentTag !== tag)
+        : currentTags.length < maxArticleContextTags
+          ? [...currentTags, tag]
+          : currentTags;
+      return { ...current, [article.article_id]: nextTags };
+    });
+  };
+
+  const removeArticleTag = (article: QualityArticle, tag: string) => {
+    setArticleTagDrafts((current) => {
+      const currentTags = current[article.article_id] ?? normalizeArticleContextTags(article.tags);
+      return { ...current, [article.article_id]: currentTags.filter((currentTag) => currentTag !== tag) };
+    });
+  };
+
   const saveArticleReview = async (article: QualityArticle, decision: ArticleDecision) => {
     if (reviewRequestInFlight.current) return;
     reviewRequestInFlight.current = true;
     setSavingArticleReview({ articleID: article.article_id, decision });
     setQualityNotice(null);
     let sampleChanged = false;
+    const tags = getArticleTagDraft(article);
     try {
       const response = await fetch(qualityArticlesURL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ article_id: article.article_id, decision }),
+        body: JSON.stringify({ article_id: article.article_id, decision, tags }),
       });
       if (!response.ok) {
         sampleChanged = response.status === 400;
         throw new Error(`Article review API returned ${response.status}`);
       }
       const payload = await response.json() as ArticleReviewResponse;
-      if (payload.review.article_id !== article.article_id || payload.review.decision !== decision) {
+      if (
+        payload.review.article_id !== article.article_id
+        || payload.review.decision !== decision
+        || payload.review.decision_schema_version !== 2
+      ) {
         throw new Error("Article review API returned an unexpected answer");
       }
+      const savedTags = normalizeArticleContextTags(payload.review.tags);
       focusAfterReview.current = true;
       setQualitySample((current) => current ? {
         ...current,
         articles: current.articles.map((item) => item.article_id === article.article_id
-          ? { ...item, decision: payload.review.decision, reviewed_at: payload.review.reviewed_at }
+          ? {
+            ...item,
+            decision: payload.review.decision,
+            decision_schema_version: payload.review.decision_schema_version,
+            reviewed_at: payload.review.reviewed_at,
+            tags: savedTags,
+          }
           : item),
       } : current);
-      const decisionKey = articleReviewOptions.find((option) => option.value === decision)?.labelKey;
-      const decisionLabel = decisionKey ? t(decisionKey) : decision;
-      const pendingAfterSave = Math.max(0, pendingQualityArticles.length - (article.decision ? 0 : 1));
+      setArticleTagDrafts((current) => ({ ...current, [article.article_id]: savedTags }));
+      setArticleTagInputs((current) => ({ ...current, [article.article_id]: "" }));
+      const decisionMetadata = getArticleReviewOption(decision);
+      const decisionLabel = decisionMetadata ? t(decisionMetadata.labelKey) : decision;
+      const pendingAfterSave = Math.max(0, pendingQualityArticles.length - (hasDetailedArticleReview(article) ? 0 : 1));
       const remainingCopy = pendingAfterSave === 0
         ? t("noQueueRemaining")
         : pendingAfterSave === 1
@@ -866,7 +1097,7 @@ export default function AdminPage() {
           : t("manyQueueRemaining", { count: formatNumber(pendingAfterSave, localeTag) });
       setQualityNotice({
         kind: "success",
-        message: decision === "uncertain"
+        message: decisionMetadata?.resolved === false
           ? t("savedUncertain", { decision: decisionLabel, remaining: remainingCopy })
           : t("savedResolved", { decision: decisionLabel, remaining: remainingCopy }),
       });
@@ -1289,8 +1520,8 @@ export default function AdminPage() {
             </div>
           </article>
           <aside className="admin-quality-results">
-            <div><span>{t("strongMatchRelevance")}</span><strong>{formatPercent(qualitySummary?.high_match_precision, localeTag)}</strong><small>{t("strongResolved", { count: formatNumber(qualitySummary?.high_resolved ?? 0, localeTag) })}</small></div>
-            <div><span>{t("blockedRelevance")}</span><strong>{formatPercent(qualitySummary?.weak_match_relevant_rate, localeTag)}</strong><small>{t("blockedResolved", { count: formatNumber(qualitySummary?.weak_resolved ?? 0, localeTag) })}</small></div>
+            <div><span>{t("strongMatchRelevance")}</span><strong>{formatPercent(qualitySummary?.high_match_flood_related_rate, localeTag)}</strong><small>{t("strongResolved", { count: formatNumber(qualitySummary?.high_resolved ?? 0, localeTag) })}</small></div>
+            <div><span>{t("blockedRelevance")}</span><strong>{formatPercent(qualitySummary?.weak_match_flood_related_rate, localeTag)}</strong><small>{t("blockedResolved", { count: formatNumber(qualitySummary?.weak_resolved ?? 0, localeTag) })}</small></div>
             <p>{t("qualityCaveat")}</p>
           </aside>
         </div>
@@ -1300,6 +1531,35 @@ export default function AdminPage() {
           <li><span>02</span><div><strong>{t("judgeFlooding")}</strong><small>{t("judgeFloodingHelp")}</small></div></li>
           <li><span>03</span><div><strong>{t("honestUncertainty")}</strong><small>{t("honestUncertaintyHelp")}</small></div></li>
         </ol>
+
+        <section className="article-training-labels" aria-labelledby="training-label-breakdown-heading">
+          <div className="article-training-heading">
+            <div>
+              <p className="eyebrow">{t("measurementProgress")}</p>
+              <h3 id="training-label-breakdown-heading">{t("trainingLabelBreakdown")}</h3>
+              <p>{t("trainingLabelHelp")}</p>
+            </div>
+            {qualitySummary === null ? (
+              <p className="legacy-review-note">{t("trainingCountsUnavailable")}</p>
+            ) : safeCount(qualitySummary.legacy_reviews) > 0 ? (
+              <p className="legacy-review-note">
+                {safeCount(qualitySummary.legacy_reviews) === 1
+                  ? t("oneLegacyExcluded")
+                  : t("legacyExcluded", { count: formatNumber(safeCount(qualitySummary.legacy_reviews), localeTag) })}
+              </p>
+            ) : null}
+          </div>
+          <p className="article-label-precedence" id="article-review-precedence">{t("labelPrecedence")}</p>
+          <ol className="article-training-counts">
+            {articleReviewOptions.map((option) => (
+              <li className={option.tone} key={option.value}>
+                <strong>{qualitySummary === null ? "—" : formatNumber(safeCount(qualitySummary[option.countField]), localeTag)}</strong>
+                <span>{t(option.labelKey)}</span>
+                <small id={`article-label-definition-${option.value}`}>{t(option.definitionKey)}</small>
+              </li>
+            ))}
+          </ol>
+        </section>
 
         {qualityNotice ? (
           <p
@@ -1334,42 +1594,40 @@ export default function AdminPage() {
             {visibleQualityArticles.map((article) => {
               const link = safeArticleURL(article.url);
               const isSaving = savingArticleReview?.articleID === article.article_id;
-              const activeDecision = isSaving ? savingArticleReview?.decision : article.decision;
-              const bucketLabel = article.review_bucket === "high_match"
-                ? t("strongMatch")
-                : article.review_bucket === "headline_conflict"
-                  ? t("headlineConflict")
-                  : t("ambiguousMatch");
-              const reviewReason = article.review_bucket === "high_match"
-                ? t("highMatchReason")
-                : article.review_bucket === "headline_conflict"
-                  ? t("conflictReason")
-                  : t("ambiguousReason");
+              const activeDecision = isSaving
+                ? savingArticleReview?.decision
+                : getDetailedArticleDecision(article);
+              const bucket = reviewBucketMetadata[article.review_bucket];
+              const decisionStatus = getArticleDecisionStatus(article, isSaving);
+              const titleSourceKey = getTitleSourceMessageKey(article.title_source);
+              const currentTags = getArticleTagDraft(article);
+              const tagInput = articleTagInputs[article.article_id] ?? "";
+              const normalizedTagInput = normalizeArticleContextTag(tagInput);
+              const tagInputCanBeAdded = Boolean(
+                normalizedTagInput
+                && !currentTags.includes(normalizedTagInput)
+                && currentTags.length < maxArticleContextTags,
+              );
+              const tagControlID = encodeURIComponent(article.article_id).replaceAll("%", "-");
+              const tagHelpID = `article-context-tags-help-${tagControlID}`;
+              const tagInputID = `article-context-tag-input-${tagControlID}`;
               return (
                 <article
                   aria-busy={isSaving}
-                  className={`article-quality-card${isSaving ? " saving" : ""}${article.decision ? " reviewed" : ""}`}
+                  className={`article-quality-card${isSaving ? " saving" : ""}${hasDetailedArticleReview(article) ? " reviewed" : ""}${hasLegacyArticleReview(article) ? " legacy-review" : ""}`}
                   key={article.article_id}
                 >
                   <header>
-                    <span className={`quality-strength ${article.match_strength}`}>{bucketLabel}</span>
-                    <span className={activeDecision ? `decision-chip ${activeDecision === "relevant" ? "confirmed" : activeDecision === "not_relevant" ? "irrelevant" : "uncertain"}` : "decision-chip pending"}>
-                      {isSaving ? t("savingAnswer") : activeDecision === "relevant" ? t("relevant") : activeDecision === "not_relevant" ? t("notRelevant") : activeDecision === "uncertain" ? t("uncertain") : t("needsReview")}
+                    <span className={`quality-strength ${article.match_strength}`}>{t(bucket.labelKey)}</span>
+                    <span className={`decision-chip ${decisionStatus.tone}`}>
+                      {t(decisionStatus.labelKey)}
                     </span>
                   </header>
                   {link ? <a className="article-quality-title" href={link} rel="noopener noreferrer" target="_blank">{article.title} <span aria-hidden="true">↗</span></a> : <strong className="article-quality-title">{article.title}</strong>}
                   <small className={`article-title-source ${article.title_source ?? "legacy"}`}>
-                    {article.title_source === "manual_override"
-                      ? t("manualTitle")
-                      : article.title_source === "publisher_metadata"
-                      ? t("publisherTitle")
-                      : article.title_source === "url_path"
-                        ? t("urlTitle")
-                        : article.title_source === "unavailable"
-                          ? t("unavailableTitle")
-                          : t("unrecordedTitle")}
+                    {t(titleSourceKey)}
                   </small>
-                  <p>{reviewReason}</p>
+                  <p>{t(bucket.reasonKey)}</p>
                   <dl>
                     <div><dt>{t("publisher")}</dt><dd>{article.source_domain || t("unknown")}</dd></div>
                     <div><dt>{t("location")}</dt><dd>{article.location_name || t("unassignedLocation")}</dd></div>
@@ -1379,9 +1637,87 @@ export default function AdminPage() {
                     {article.themes.slice(0, 2).map((theme) => <span key={theme}>{theme}</span>)}
                   </div>
                   {isSaving ? <p className="article-review-state" role="status">{t("savingThisAnswer")}</p> : null}
-                  <div className="review-actions" aria-label={t("reviewArticle", { title: article.title })}>
+                  <details className="article-context-tags">
+                    <summary>
+                      <strong>{t("contextTags")}</strong>
+                      <span>{currentTags.length}/{maxArticleContextTags}</span>
+                    </summary>
+                    <div className="article-context-tags-body">
+                      <p>{t("contextTagsHelp")}</p>
+                      <div className="article-tag-suggestions" aria-label={t("suggestedContextTags")} role="group">
+                      {articleContextTagSuggestions.map((suggestion) => {
+                        const selected = currentTags.includes(suggestion.value);
+                        return (
+                          <button
+                            aria-pressed={selected}
+                            className={selected ? "selected" : ""}
+                            disabled={isSaving || (!selected && currentTags.length >= maxArticleContextTags)}
+                            key={suggestion.value}
+                            onClick={() => toggleArticleTag(article, suggestion.value)}
+                            type="button"
+                          >
+                            <strong>{t(suggestion.labelKey)}</strong>
+                            <small>{t(suggestion.descriptionKey)}</small>
+                          </button>
+                        );
+                      })}
+                      </div>
+                      {currentTags.length ? (
+                        <ul className="selected-article-tags" aria-label={t("contextTags")}>
+                        {currentTags.map((tag) => {
+                          const suggestion = contextTagSuggestionByValue.get(tag);
+                          const visibleTag = suggestion ? t(suggestion.labelKey) : tag;
+                          return (
+                            <li key={tag}>
+                              <span>{visibleTag}</span>
+                              <button
+                                aria-label={t("removeContextTag", { tag: visibleTag })}
+                                disabled={isSaving}
+                                onClick={() => removeArticleTag(article, tag)}
+                                type="button"
+                              >
+                                <span aria-hidden="true">×</span>
+                              </button>
+                            </li>
+                          );
+                        })}
+                        </ul>
+                      ) : null}
+                      <form
+                        className="article-custom-tag-form"
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          if (tagInputCanBeAdded) addArticleTag(article, tagInput);
+                        }}
+                      >
+                        <label htmlFor={tagInputID}>{t("customContextTag")}</label>
+                        <div>
+                          <input
+                            aria-describedby={tagHelpID}
+                            disabled={isSaving}
+                            id={tagInputID}
+                            maxLength={96}
+                            onChange={(event) => setArticleTagInputs((current) => ({
+                              ...current,
+                              [article.article_id]: event.target.value,
+                            }))}
+                            placeholder={t("customContextTagPlaceholder")}
+                            type="text"
+                            value={tagInput}
+                          />
+                          <button disabled={isSaving || !tagInputCanBeAdded} type="submit">{t("addContextTag")}</button>
+                        </div>
+                        <small id={tagHelpID}>
+                          {t("contextTagFormat")} {t("contextTagSaveHelp")}
+                          {currentTags.length >= maxArticleContextTags ? ` ${t("contextTagLimit")}` : ""}
+                        </small>
+                      </form>
+                    </div>
+                  </details>
+                  <div className="review-actions" aria-describedby="article-review-precedence" aria-label={t("reviewArticle", { title: article.title })}>
                     {articleReviewOptions.map((option) => (
                       <button
+                        aria-describedby={`article-label-definition-${option.value}`}
                         aria-pressed={activeDecision === option.value}
                         className={`review-button ${option.tone}${activeDecision === option.value ? " selected" : ""}`}
                         disabled={connection !== "ready" || savingArticleReview !== null}
@@ -1389,7 +1725,8 @@ export default function AdminPage() {
                         onClick={() => void saveArticleReview(article, option.value)}
                         type="button"
                       >
-                        {isSaving && savingArticleReview?.decision === option.value ? t("saving") : t(option.labelKey)}
+                        {activeDecision === option.value ? <span aria-hidden="true" className="review-selected-check">✓</span> : null}
+                        <span>{isSaving && savingArticleReview?.decision === option.value ? t("saving") : t(option.labelKey)}</span>
                       </button>
                     ))}
                   </div>

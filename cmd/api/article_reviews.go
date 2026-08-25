@@ -19,6 +19,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 const (
@@ -26,25 +28,30 @@ const (
 	maxArticleReviewLogBytes   = 4 << 20
 	minimumArticleReviewSample = 20
 	minimumStratumReviews      = 5
+	articleDecisionSchemaV2    = 2
+	maximumArticleReviewTags   = 8
+	maximumArticleTagRunes     = 32
 )
 
 var articleIDPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
 
 type qualityArticle struct {
-	ArticleID     string   `json:"article_id"`
-	SeenAt        string   `json:"seen_at"`
-	Title         string   `json:"title"`
-	TitleSource   string   `json:"title_source,omitempty"`
-	URL           string   `json:"url"`
-	SourceDomain  string   `json:"source_domain"`
-	LocationName  string   `json:"location_name"`
-	MatchStrength string   `json:"match_strength"`
-	ReviewBucket  string   `json:"review_bucket"`
-	ReviewReason  string   `json:"review_reason"`
-	Themes        []string `json:"themes"`
-	QualityFlags  []string `json:"quality_flags"`
-	Decision      string   `json:"decision,omitempty"`
-	ReviewedAt    string   `json:"reviewed_at,omitempty"`
+	ArticleID             string   `json:"article_id"`
+	SeenAt                string   `json:"seen_at"`
+	Title                 string   `json:"title"`
+	TitleSource           string   `json:"title_source,omitempty"`
+	URL                   string   `json:"url"`
+	SourceDomain          string   `json:"source_domain"`
+	LocationName          string   `json:"location_name"`
+	MatchStrength         string   `json:"match_strength"`
+	ReviewBucket          string   `json:"review_bucket"`
+	ReviewReason          string   `json:"review_reason"`
+	Themes                []string `json:"themes"`
+	QualityFlags          []string `json:"quality_flags"`
+	Decision              string   `json:"decision,omitempty"`
+	DecisionSchemaVersion int      `json:"decision_schema_version,omitempty"`
+	Tags                  []string `json:"tags,omitempty"`
+	ReviewedAt            string   `json:"reviewed_at,omitempty"`
 }
 
 type qualitySampleFile struct {
@@ -56,19 +63,22 @@ type qualitySampleFile struct {
 }
 
 type articleReviewRequest struct {
-	ArticleID string `json:"article_id"`
-	Decision  string `json:"decision"`
+	ArticleID string   `json:"article_id"`
+	Decision  string   `json:"decision"`
+	Tags      []string `json:"tags,omitempty"`
 }
 
 type articleReviewRecord struct {
-	ArticleID     string `json:"article_id"`
-	Title         string `json:"title"`
-	URL           string `json:"url"`
-	SourceDomain  string `json:"source_domain"`
-	MatchStrength string `json:"match_strength"`
-	ReviewBucket  string `json:"review_bucket"`
-	Decision      string `json:"decision"`
-	ReviewedAt    string `json:"reviewed_at"`
+	ArticleID             string   `json:"article_id"`
+	Title                 string   `json:"title"`
+	URL                   string   `json:"url"`
+	SourceDomain          string   `json:"source_domain"`
+	MatchStrength         string   `json:"match_strength"`
+	ReviewBucket          string   `json:"review_bucket"`
+	Decision              string   `json:"decision"`
+	DecisionSchemaVersion int      `json:"decision_schema_version"`
+	Tags                  []string `json:"tags,omitempty"`
+	ReviewedAt            string   `json:"reviewed_at"`
 }
 
 type articleReviewResponse struct {
@@ -76,20 +86,23 @@ type articleReviewResponse struct {
 }
 
 type articleReviewSummaryResponse struct {
-	TotalReviews          int      `json:"total_reviews"`
-	RelevantArticles      int      `json:"relevant_articles"`
-	NotRelevantArticles   int      `json:"not_relevant_articles"`
-	Uncertain             int      `json:"uncertain"`
-	ResolvedReviews       int      `json:"resolved_reviews"`
-	MinimumSample         int      `json:"minimum_sample"`
-	RemainingToSample     int      `json:"remaining_to_sample"`
-	HighResolved          int      `json:"high_resolved"`
-	HighRelevant          int      `json:"high_relevant"`
-	WeakResolved          int      `json:"weak_resolved"`
-	WeakRelevant          int      `json:"weak_relevant"`
-	HighMatchPrecision    *float64 `json:"high_match_precision"`
-	WeakMatchRelevantRate *float64 `json:"weak_match_relevant_rate"`
-	Status                string   `json:"status"`
+	TotalReviews              int      `json:"total_reviews"`
+	LegacyReviews             int      `json:"legacy_reviews"`
+	ReportedFloodingArticles  int      `json:"reported_flooding_articles"`
+	FloodRiskWarningArticles  int      `json:"flood_risk_warning_articles"`
+	HeavyRainOnlyArticles     int      `json:"heavy_rain_only_articles"`
+	NotFloodRelatedArticles   int      `json:"not_flood_related_articles"`
+	Uncertain                 int      `json:"uncertain"`
+	ResolvedReviews           int      `json:"resolved_reviews"`
+	MinimumSample             int      `json:"minimum_sample"`
+	RemainingToSample         int      `json:"remaining_to_sample"`
+	HighResolved              int      `json:"high_resolved"`
+	HighFloodRelated          int      `json:"high_flood_related"`
+	WeakResolved              int      `json:"weak_resolved"`
+	WeakFloodRelated          int      `json:"weak_flood_related"`
+	HighMatchFloodRelatedRate *float64 `json:"high_match_flood_related_rate"`
+	WeakMatchFloodRelatedRate *float64 `json:"weak_match_flood_related_rate"`
+	Status                    string   `json:"status"`
 }
 
 type articleReviewStore struct {
@@ -124,6 +137,8 @@ func (service *api) qualityArticles(writer http.ResponseWriter, request *http.Re
 		for index := range sample.Articles {
 			if review, ok := latest[sample.Articles[index].ArticleID]; ok {
 				sample.Articles[index].Decision = review.Decision
+				sample.Articles[index].DecisionSchemaVersion = review.DecisionSchemaVersion
+				sample.Articles[index].Tags = append([]string(nil), review.Tags...)
 				sample.Articles[index].ReviewedAt = review.ReviewedAt
 			}
 		}
@@ -143,7 +158,7 @@ func (service *api) qualityArticles(writer http.ResponseWriter, request *http.Re
 			writeError(writer, http.StatusBadRequest, "invalid article review")
 			return
 		}
-		if err := validateArticleReviewInput(input); err != nil {
+		if err := validateArticleReviewInput(&input); err != nil {
 			writeError(writer, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -163,7 +178,7 @@ func (service *api) qualityArticles(writer http.ResponseWriter, request *http.Re
 			writeError(writer, http.StatusBadRequest, "article is not in the current quality sample")
 			return
 		}
-		review, err := service.articleReviews.save(*selected, input.Decision)
+		review, err := service.articleReviews.save(*selected, input.Decision, input.Tags)
 		if err != nil {
 			service.logger.Printf("article review save failed: %v", err)
 			writeError(writer, http.StatusInternalServerError, "article review could not be saved")
@@ -198,36 +213,50 @@ func summarizeArticleReviews(reviews []articleReviewRecord) articleReviewSummary
 		Status:        "collecting_labels",
 	}
 	for _, review := range reviews {
+		if review.DecisionSchemaVersion == 0 || review.DecisionSchemaVersion == 1 {
+			summary.LegacyReviews++
+			continue
+		}
+		if review.DecisionSchemaVersion != articleDecisionSchemaV2 {
+			continue
+		}
+		floodRelated := false
 		switch review.Decision {
-		case "relevant":
-			summary.RelevantArticles++
-		case "not_relevant":
-			summary.NotRelevantArticles++
+		case "reported_flooding":
+			summary.ReportedFloodingArticles++
+			floodRelated = true
+		case "flood_risk_warning":
+			summary.FloodRiskWarningArticles++
+			floodRelated = true
+		case "heavy_rain_only":
+			summary.HeavyRainOnlyArticles++
+		case "not_flood_related":
+			summary.NotFloodRelatedArticles++
 		case "uncertain":
 			summary.Uncertain++
-		}
-		if review.Decision == "uncertain" {
+			continue
+		default:
 			continue
 		}
 		if review.MatchStrength == "high" {
 			summary.HighResolved++
-			if review.Decision == "relevant" {
-				summary.HighRelevant++
+			if floodRelated {
+				summary.HighFloodRelated++
 			}
 		} else {
 			summary.WeakResolved++
-			if review.Decision == "relevant" {
-				summary.WeakRelevant++
+			if floodRelated {
+				summary.WeakFloodRelated++
 			}
 		}
 	}
-	summary.ResolvedReviews = summary.RelevantArticles + summary.NotRelevantArticles
+	summary.ResolvedReviews = summary.ReportedFloodingArticles + summary.FloodRiskWarningArticles + summary.HeavyRainOnlyArticles + summary.NotFloodRelatedArticles
 	summary.RemainingToSample = max(0, minimumArticleReviewSample-summary.ResolvedReviews)
 	if summary.ResolvedReviews >= minimumArticleReviewSample && summary.HighResolved >= minimumStratumReviews && summary.WeakResolved >= minimumStratumReviews {
-		highPrecision := float64(summary.HighRelevant) / float64(summary.HighResolved)
-		weakRelevantRate := float64(summary.WeakRelevant) / float64(summary.WeakResolved)
-		summary.HighMatchPrecision = &highPrecision
-		summary.WeakMatchRelevantRate = &weakRelevantRate
+		highFloodRelatedRate := float64(summary.HighFloodRelated) / float64(summary.HighResolved)
+		weakFloodRelatedRate := float64(summary.WeakFloodRelated) / float64(summary.WeakResolved)
+		summary.HighMatchFloodRelatedRate = &highFloodRelatedRate
+		summary.WeakMatchFloodRelatedRate = &weakFloodRelatedRate
 		summary.Status = "sample_ready"
 	}
 	return summary
@@ -244,13 +273,13 @@ func (service *api) qualityArticleExport(writer http.ResponseWriter, request *ht
 	}
 	var output bytes.Buffer
 	csvWriter := csv.NewWriter(&output)
-	columns := []string{"article_id", "title", "url", "source_domain", "match_strength", "review_bucket", "decision", "reviewed_at"}
+	columns := []string{"article_id", "title", "url", "source_domain", "match_strength", "review_bucket", "decision", "decision_schema_version", "reviewed_at", "tags"}
 	if err := csvWriter.Write(columns); err != nil {
 		writeError(writer, http.StatusInternalServerError, "article review export unavailable")
 		return
 	}
 	for _, review := range reviews {
-		row := []string{review.ArticleID, review.Title, review.URL, review.SourceDomain, review.MatchStrength, review.ReviewBucket, review.Decision, review.ReviewedAt}
+		row := []string{review.ArticleID, review.Title, review.URL, review.SourceDomain, review.MatchStrength, review.ReviewBucket, review.Decision, fmt.Sprintf("%d", review.DecisionSchemaVersion), review.ReviewedAt, strings.Join(review.Tags, "|")}
 		for index := range row {
 			row[index] = spreadsheetSafe(row[index])
 		}
@@ -360,26 +389,93 @@ func safeExternalArticleURL(value string) bool {
 	return true
 }
 
-func validateArticleReviewInput(input articleReviewRequest) error {
+func validateArticleReviewInput(input *articleReviewRequest) error {
 	if !articleIDPattern.MatchString(input.ArticleID) {
 		return errors.New("invalid article ID")
 	}
-	if input.Decision != "relevant" && input.Decision != "not_relevant" && input.Decision != "uncertain" {
-		return errors.New("decision must be relevant, not_relevant, or uncertain")
+	if !isArticleDecisionV2(input.Decision) {
+		return errors.New("decision must be reported_flooding, flood_risk_warning, heavy_rain_only, not_flood_related, or uncertain")
 	}
+	tags, err := normalizeArticleTags(input.Tags)
+	if err != nil {
+		return err
+	}
+	input.Tags = tags
 	return nil
 }
 
-func (store *articleReviewStore) save(article qualityArticle, decision string) (articleReviewRecord, error) {
+func normalizeArticleTags(tags []string) ([]string, error) {
+	normalized := make([]string, 0, len(tags))
+	seen := make(map[string]struct{}, len(tags))
+	for _, tag := range tags {
+		canonical := normalizeArticleTag(tag)
+		if canonical == "" {
+			return nil, errors.New("article tags must contain at least one letter or digit")
+		}
+		if utf8.RuneCountInString(canonical) > maximumArticleTagRunes {
+			return nil, fmt.Errorf("article tags must be at most %d characters", maximumArticleTagRunes)
+		}
+		if _, duplicate := seen[canonical]; duplicate {
+			continue
+		}
+		seen[canonical] = struct{}{}
+		normalized = append(normalized, canonical)
+		if len(normalized) > maximumArticleReviewTags {
+			return nil, fmt.Errorf("article reviews may have at most %d tags", maximumArticleReviewTags)
+		}
+	}
+	return normalized, nil
+}
+
+func normalizeArticleTag(value string) string {
+	normalized := make([]rune, 0, len(value))
+	separatorPending := false
+	for _, character := range value {
+		if unicode.IsLetter(character) || unicode.IsDigit(character) {
+			if separatorPending && len(normalized) > 0 {
+				normalized = append(normalized, '-')
+			}
+			normalized = append(normalized, unicode.ToLower(character))
+			separatorPending = false
+			continue
+		}
+		if len(normalized) > 0 {
+			separatorPending = true
+		}
+	}
+	return string(normalized)
+}
+
+func isArticleDecisionV2(decision string) bool {
+	switch decision {
+	case "reported_flooding", "flood_risk_warning", "heavy_rain_only", "not_flood_related", "uncertain":
+		return true
+	default:
+		return false
+	}
+}
+
+func isArticleDecisionV1(decision string) bool {
+	switch decision {
+	case "relevant", "not_relevant", "uncertain":
+		return true
+	default:
+		return false
+	}
+}
+
+func (store *articleReviewStore) save(article qualityArticle, decision string, tags []string) (articleReviewRecord, error) {
 	record := articleReviewRecord{
-		ArticleID:     article.ArticleID,
-		Title:         article.Title,
-		URL:           article.URL,
-		SourceDomain:  article.SourceDomain,
-		MatchStrength: article.MatchStrength,
-		ReviewBucket:  article.ReviewBucket,
-		Decision:      decision,
-		ReviewedAt:    store.now().UTC().Format(time.RFC3339Nano),
+		ArticleID:             article.ArticleID,
+		Title:                 article.Title,
+		URL:                   article.URL,
+		SourceDomain:          article.SourceDomain,
+		MatchStrength:         article.MatchStrength,
+		ReviewBucket:          article.ReviewBucket,
+		Decision:              decision,
+		DecisionSchemaVersion: articleDecisionSchemaV2,
+		Tags:                  append([]string(nil), tags...),
+		ReviewedAt:            store.now().UTC().Format(time.RFC3339Nano),
 	}
 	if err := validateStoredArticleReview(record); err != nil {
 		return articleReviewRecord{}, err
@@ -440,7 +536,13 @@ func (store *articleReviewStore) list() ([]articleReviewRecord, error) {
 			continue
 		}
 		var record articleReviewRecord
-		if err := json.Unmarshal(line, &record); err != nil || validateStoredArticleReview(record) != nil {
+		if err := json.Unmarshal(line, &record); err != nil {
+			return nil, errors.New("invalid article review log entry")
+		}
+		if record.DecisionSchemaVersion == 0 {
+			record.DecisionSchemaVersion = 1
+		}
+		if validateStoredArticleReview(record) != nil {
 			return nil, errors.New("invalid article review log entry")
 		}
 		latest[record.ArticleID] = record
@@ -459,8 +561,32 @@ func (store *articleReviewStore) list() ([]articleReviewRecord, error) {
 }
 
 func validateStoredArticleReview(record articleReviewRecord) error {
-	if err := validateArticleReviewInput(articleReviewRequest{ArticleID: record.ArticleID, Decision: record.Decision}); err != nil {
-		return err
+	if !articleIDPattern.MatchString(record.ArticleID) {
+		return errors.New("invalid article ID")
+	}
+	switch record.DecisionSchemaVersion {
+	case 1:
+		if !isArticleDecisionV1(record.Decision) {
+			return errors.New("invalid schema v1 article decision")
+		}
+		if len(record.Tags) > 0 {
+			return errors.New("schema v1 article reviews cannot have tags")
+		}
+	case articleDecisionSchemaV2:
+		if !isArticleDecisionV2(record.Decision) {
+			return errors.New("invalid schema v2 article decision")
+		}
+		normalizedTags, err := normalizeArticleTags(record.Tags)
+		if err != nil || len(normalizedTags) != len(record.Tags) {
+			return errors.New("invalid schema v2 article tags")
+		}
+		for index := range normalizedTags {
+			if normalizedTags[index] != record.Tags[index] {
+				return errors.New("invalid schema v2 article tags")
+			}
+		}
+	default:
+		return errors.New("invalid article decision schema version")
 	}
 	if len(record.Title) < 1 || len(record.Title) > 1024 || len(record.SourceDomain) > 255 || !safeExternalArticleURL(record.URL) {
 		return errors.New("invalid stored article evidence")

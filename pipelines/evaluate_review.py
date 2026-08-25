@@ -17,7 +17,23 @@ REQUIRED_COLUMNS = {
     "label_primary_region",
 }
 CONFIDENT_LOCATION_STATUSES = {"single_region", "dominant_region"}
-RELEVANCE_LABELS = {"relevant", "not_relevant", "uncertain", ""}
+LEGACY_RELEVANCE_LABELS = {"relevant", "not_relevant"}
+DETAILED_RELEVANCE_LABELS = {
+    "reported_flooding",
+    "flood_risk_warning",
+    "heavy_rain_only",
+    "not_flood_related",
+}
+FLOOD_RELATED_LABELS = {
+    "relevant",
+    "reported_flooding",
+    "flood_risk_warning",
+}
+RELEVANCE_LABELS = (
+    LEGACY_RELEVANCE_LABELS
+    | DETAILED_RELEVANCE_LABELS
+    | {"uncertain", ""}
+)
 
 
 def _rate(numerator: int, denominator: int) -> float | None:
@@ -45,6 +61,9 @@ def evaluate_review(input_path: Path) -> dict[str, object]:
     relevance_unlabeled = 0
     relevance_uncertain = 0
     relevance_by_strength: dict[str, dict[str, int]] = {}
+    relevance_class_counts = {
+        label: 0 for label in sorted(RELEVANCE_LABELS.difference({""}))
+    }
     location_unlabeled = 0
     location_uncertain = 0
     location_labeled = 0
@@ -60,13 +79,15 @@ def evaluate_review(input_path: Path) -> dict[str, object]:
             relevance_unlabeled += 1
         elif relevance == "uncertain":
             relevance_uncertain += 1
+            relevance_class_counts[relevance] += 1
         else:
+            relevance_class_counts[relevance] += 1
             strength = row["disaster_match_strength"].strip().lower()
             counts = relevance_by_strength.setdefault(
                 strength, {"labeled": 0, "relevant": 0}
             )
             counts["labeled"] += 1
-            counts["relevant"] += int(relevance == "relevant")
+            counts["relevant"] += int(relevance in FLOOD_RELATED_LABELS)
 
         primary_region = row["label_primary_region"].strip().upper()
         if not primary_region:
@@ -98,6 +119,7 @@ def evaluate_review(input_path: Path) -> dict[str, object]:
             "unlabeled_rows": relevance_unlabeled,
             "uncertain_rows": relevance_uncertain,
             "relevant_rows": relevance_relevant,
+            "class_counts": relevance_class_counts,
             "overall_relevance_rate": _rate(
                 relevance_relevant, relevance_labeled
             ),
