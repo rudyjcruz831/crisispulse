@@ -3,6 +3,471 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import bundledDashboardData from "../../data/dashboard.json";
+import { defineMessages, formatMessage, LanguageSwitcher, useLocale } from "../i18n";
+
+const messages = defineMessages({
+  documentTitle: "CrisisPulse Admin — Operations console",
+  documentDescription: "Private local operations view for CrisisPulse data, forecasts, reviews, and readiness.",
+  brandHome: "CrisisPulse dashboard home",
+  primaryNavigation: "Primary navigation",
+  dashboard: "Dashboard",
+  admin: "Admin",
+  liveOperations: "Live operations",
+  checkingOperations: "Checking operations",
+  verifiedSnapshot: "Verified snapshot",
+  adminSections: "Admin sections",
+  status: "Status",
+  operations: "Operations",
+  forecasts: "Forecasts",
+  quality: "Quality",
+  operationsConsole: "Operations console",
+  heroTitle: "Know what is working before customers do.",
+  heroDescription: "One private view for data freshness, forecasts, model health, human review, and the work remaining before a reliable paid pilot.",
+  currentSystemHealth: "Current system health",
+  currentStatus: "Current status",
+  operatingNormally: "Operating normally",
+  operationsStatusUnavailable: "Operations status unavailable",
+  attentionNeeded: "Attention needed",
+  lastSuccessfulRefresh: "Last successful refresh {time}.",
+  latestRetainedData: "Latest retained data {time}.",
+  easternTime: "Times are shown in U.S. Eastern Time.",
+  checking: "Checking…",
+  checkNow: "Check now",
+  operationsSummary: "Operations summary",
+  refreshHealth: "Refresh health",
+  sinceLastSuccess: "Since last success",
+  waitingForLiveStatus: "Waiting for live status",
+  openForecasts: "Open forecasts",
+  futureOutcomesCollecting: "Future outcomes still collecting",
+  articleReviews: "Article reviews",
+  balancedRatesUnlocked: "Balanced quality rates unlocked",
+  reviewBalanceNeeded: "Strong and blocked review balance still needed",
+  reviewMinimumRemaining: "{count} until the total minimum; balance also required",
+  modelHoldout: "Model holdout",
+  oneLaterRow: "1 later row",
+  laterRows: "{count} later rows",
+  operatingChecks: "Operating checks",
+  liveSystemChecklist: "Live system checklist",
+  healthy: "Healthy",
+  checkStatus: "Check status",
+  controlsReadOnly: "The page checks the local API every minute. No operational control here can alter or delete data.",
+  localApi: "Local API",
+  connected: "Connected",
+  snapshotFallback: "Snapshot fallback",
+  dataRefresh: "15-minute data refresh",
+  statusUnavailable: "Status unavailable",
+  refreshRunning: "Refresh in progress",
+  refreshCompleted: "Refresh completed",
+  refreshNeedsAttention: "Refresh needs attention",
+  dashboardSnapshot: "Dashboard snapshot",
+  chronologicalModel: "Chronological model",
+  benchmarkReady: "Benchmark ready",
+  unavailable: "Unavailable",
+  articleFilterEvaluation: "Article filter evaluation",
+  resolvedOf: "{resolved} of {minimum} resolved",
+  nextRefreshExpected: "Next refresh expected",
+  filesProcessed: "Files processed last run",
+  permanentArchive: "Permanent article archive",
+  archiveRunDetails: "{bytes} compressed · {count} new last run",
+  preservedBeforeRotation: "Preserved before raw rotation",
+  titleBackfillDetails: "{added} titles added last run · {remaining} remaining",
+  oneTitleBackfill: "1 title added last run · {remaining} remaining",
+  titleBackfillPending: "Gradual title backfill pending",
+  rawArchiveUsage: "Raw archive usage",
+  filesRetained: "{count} files retained",
+  oneFileRetained: "1 file retained",
+  storageBudget: "10 GB storage budget",
+  reliabilityCheck: "48-hour reliability check",
+  checkingReadiness: "Checking readiness",
+  goPrivatePilot: "Go: ready for private pilot setup",
+  checkRestarted: "Check restarted",
+  keepObserving: "Keep observing",
+  checkingReliabilityRecord: "Checking the live reliability record.",
+  readinessUnavailableHeading: "Live readiness status is unavailable.",
+  reliabilityPassed: "The local reliability check passed.",
+  reliabilityRestarted: "The 48-hour reliability check restarted.",
+  latestCollectionAttention: "The latest collection needs attention.",
+  firstRefreshStartsClock: "The first completed refresh starts the clock.",
+  backupStillOpen: "Reliability passed; backup verification is still open.",
+  keepComputerRunning: "Keep this computer and Docker running.",
+  noGoWithoutStatus: "CrisisPulse will not report a Go result until the live admin status is available.",
+  readyForPrivateSetup: "Local collection is reliable enough to begin private server and sign-in setup.",
+  restartedSummary: "A failed, missed, or stale refresh started a new uninterrupted observation window.",
+  evidenceFailClosed: "The reliability record remains fail-closed until a current refresh completes successfully.",
+  noElapsedBeforeRefresh: "No elapsed time is counted until a completed scheduled refresh is recorded.",
+  backupRequired: "The collection window is complete. A readable safety backup must also be verified.",
+  progressWhileRunning: "Progress advances with completed scheduled refreshes; time while the PC is off does not count.",
+  waiting: "Waiting",
+  stale: "Stale",
+  current: "Current",
+  outOfDate: "Out of date",
+  verified: "Verified",
+  failed: "Failed",
+  notChecked: "Not checked",
+  observed: "{duration} observed",
+  remaining: "{duration} remaining",
+  reliabilityProgress: "48-hour reliability check progress",
+  windowComplete: "{percent}% of the uninterrupted window complete",
+  progressUnavailable: "Progress unavailable",
+  refreshSuccessRate: "Refresh success rate",
+  intervalsCovered: "{covered} of {expected} 15-minute intervals covered",
+  oneIntervalCovered: "{covered} of 1 15-minute interval covered",
+  waitingFirstRefresh: "Waiting for the first completed refresh",
+  recordedProblems: "Recorded problems",
+  problemTotals: "{failed} failed · {missed} missed · {interrupted} interrupted since tracking began",
+  failureTotalsUnavailable: "Failure totals unavailable",
+  currentFreshness: "Current freshness",
+  lastCompleted: "Last completed {time}",
+  noCompletedRefresh: "No completed refresh recorded",
+  safetyBackup: "Safety backup",
+  backupVerifiedAt: "Verified {time}",
+  backupAge: " · {hours}h old",
+  backupCheckFailed: "The latest backup check did not pass",
+  backupNotConfirmed: "A readable backup has not been confirmed",
+  openReadinessChecks: "Readiness checks still open",
+  readinessScope: "Passing this check means CrisisPulse can move to private server and sign-in setup. It does not publish the site or grant public access.",
+  blockerSoakNotStarted: "The first completed refresh still needs to start the 48-hour check.",
+  blockerSoakInProgress: "The uninterrupted 48-hour reliability check is still running.",
+  blockerSoakFailed: "The reliability check restarted after a refresh problem.",
+  blockerEvidenceMismatch: "The reliability record does not match the latest completed refresh.",
+  blockerRefreshStale: "The latest scheduled refresh is more than 30 minutes old.",
+  blockerRefreshUnhealthy: "The latest collection has not completed successfully.",
+  blockerCoverage: "Too many scheduled refreshes were missed during this check.",
+  blockerBackupNotVerified: "A readable safety backup still needs to be verified.",
+  blockerBackupFailed: "The latest safety-backup check did not pass.",
+  blockerBackupOld: "The last verified safety backup is more than 26 hours old.",
+  blockerReliability: "Local collection reliability has not passed yet.",
+  blockerFallback: "One readiness check still needs attention.",
+  forecastOperations: "Forecast operations",
+  forecastHeading: "Open clocks and model benchmark",
+  readOnly: "Read-only",
+  region: "Region",
+  detected: "Detected",
+  outcomeCloses: "Outcome closes",
+  remainingColumn: "Remaining",
+  modelScore: "Model score",
+  storiesDomains: "{stories} {storyUnit} · {domains} {domainUnit}",
+  story: "story",
+  stories: "stories",
+  domain: "domain",
+  domains: "domains",
+  noPendingForecasts: "No forecast outcomes are currently pending.",
+  laterHoldout: "Later holdout",
+  averagePrecision: "Average precision",
+  alertPrecision: "Alert precision",
+  outcomeRecall: "Outcome recall",
+  falseAlertsDay: "False alerts/day",
+  testPositives: "Test positives",
+  benchmarkCaveat: "Exploratory media-spread benchmark—not disaster probability or production validation.",
+  filterValidation: "Article filter validation",
+  qualityHeading: "Review real examples—even when there are no alerts.",
+  qualityDescription: "A balanced daily sample measures strong flood matches separately from stories the safety filters blocked.",
+  downloadReviews: "Download reviews (.csv)",
+  measurementProgress: "Measurement progress",
+  measurementsReady: "First filter measurements are ready.",
+  ratesLocked: "Rates stay locked until the sample is credible.",
+  resolvedLabel: "resolved article label",
+  resolvedLabels: "resolved article labels",
+  resolvedProgress: "Resolved article-review progress",
+  balancedMinimum: "Balanced strong and blocked minimum reached.",
+  totalMinimumBalance: "Total minimum reached; strong and blocked labels still need balance.",
+  decisionsRemaining: "{count} more relevant or not-relevant decisions needed, balanced across strong and blocked matches.",
+  oneDecisionRemaining: "1 more relevant or not-relevant decision needed, balanced across strong and blocked matches.",
+  strongMatchRelevance: "Strong-match relevance",
+  strongResolved: "{count} strong matches resolved",
+  oneStrongResolved: "1 strong match resolved",
+  blockedRelevance: "Relevant among blocked",
+  blockedResolved: "{count} blocked matches resolved",
+  oneBlockedResolved: "1 blocked match resolved",
+  qualityCaveat: "Because this sample is deliberately balanced, these are separate filter checks—not an overall accuracy claim.",
+  reviewGuide: "How to review an article",
+  openPublisher: "Open the publisher story",
+  openPublisherHelp: "Use the headline link and read enough to identify the actual subject.",
+  judgeFlooding: "Judge physical flooding",
+  judgeFloodingHelp: "Choose Relevant flood only when the article describes a real flood, flooding, or flood response.",
+  honestUncertainty: "Keep uncertainty honest",
+  honestUncertaintyHelp: "Choose Not relevant for metaphorical or unrelated stories; use Uncertain when the evidence is insufficient.",
+  answerSaved: "Answer saved",
+  notSaved: "Not saved",
+  relevantFlood: "Relevant flood",
+  notRelevant: "Not relevant",
+  uncertain: "Uncertain",
+  relevant: "Relevant",
+  needsReview: "Needs review",
+  savingAnswer: "Saving answer",
+  saving: "Saving…",
+  noQueueRemaining: "No articles in today’s queue remain.",
+  oneQueueRemaining: "1 article still needs review.",
+  manyQueueRemaining: "{count} articles still need review.",
+  savedUncertain: "Saved as {decision}. It moved to Reviewed, but uncertain answers do not count toward the 20 resolved labels. {remaining}",
+  savedResolved: "Saved as {decision}. The card was removed from Needs review. {remaining}",
+  sampleChanged: "This daily sample changed before the answer was saved. The list is refreshing; please choose again.",
+  saveFailed: "This answer was not saved. Please try again; if it continues, select Check now to confirm the local service is connected.",
+  oneNeedsReview: "article needs review",
+  manyNeedReview: "articles need review",
+  hideReviewed: "Hide reviewed",
+  showReviewed: "Show reviewed ({count})",
+  strongMatch: "Strong match",
+  headlineConflict: "Headline conflict",
+  ambiguousMatch: "Ambiguous match",
+  manualTitle: "Manually verified publisher title",
+  publisherTitle: "Publisher-provided title",
+  urlTitle: "Cleaned from publisher URL",
+  unavailableTitle: "No trustworthy title available",
+  unrecordedTitle: "Title source not recorded",
+  highMatchReason: "Explicit flood theme; allowed to contribute to alerts",
+  conflictReason: "Headline conflicts with the flood tag; blocked from alerts",
+  ambiguousReason: "Ambiguous flood tag; retained for audit but blocked from alerts",
+  publisher: "Publisher",
+  unknown: "Unknown",
+  location: "Location",
+  unassignedLocation: "Not confidently assigned",
+  seen: "Seen",
+  savingThisAnswer: "Saving this answer…",
+  reviewArticle: "Review {title}",
+  queueClear: "Today’s review queue has no pending cards.",
+  queueClearHelp: "Every sampled article has an answer. Overall measurements unlock only after a balanced sample; use Show reviewed if you need to correct one.",
+  samplePending: "The first archive-backed daily sample will appear after the next refresh.",
+  safeByDesign: "Safe by design.",
+  safetyDescription: "Review decisions are append-only. This page cannot delete data, restart services, change billing, or issue an emergency warning.",
+  sampleDetails: "Sampled: {sampled} {articleUnit} from {archived} permanently archived {recordUnit} on {date}.",
+  article: "article",
+  articles: "articles",
+  record: "record",
+  records: "records",
+  waitingLiveSample: "Waiting for a live sample.",
+}, {
+  documentTitle: "Administración de CrisisPulse — Consola de operaciones",
+  documentDescription: "Vista local privada de datos, pronósticos, revisiones y preparación de CrisisPulse.",
+  brandHome: "Inicio del panel de CrisisPulse",
+  primaryNavigation: "Navegación principal",
+  dashboard: "Panel",
+  admin: "Administración",
+  liveOperations: "Operaciones en vivo",
+  checkingOperations: "Comprobando operaciones",
+  verifiedSnapshot: "Instantánea verificada",
+  adminSections: "Secciones de administración",
+  status: "Estado",
+  operations: "Operaciones",
+  forecasts: "Pronósticos",
+  quality: "Calidad",
+  operationsConsole: "Consola de operaciones",
+  heroTitle: "Sepa qué funciona antes que sus clientes.",
+  heroDescription: "Una vista privada de la actualidad de los datos, los pronósticos, la salud del modelo, la revisión humana y el trabajo pendiente antes de un piloto pagado confiable.",
+  currentSystemHealth: "Estado actual del sistema",
+  currentStatus: "Estado actual",
+  operatingNormally: "Funcionando con normalidad",
+  operationsStatusUnavailable: "Estado de operaciones no disponible",
+  attentionNeeded: "Requiere atención",
+  lastSuccessfulRefresh: "Última actualización correcta: {time}.",
+  latestRetainedData: "Datos conservados más recientes: {time}.",
+  easternTime: "Las horas se muestran en la hora del este de EE. UU.",
+  checking: "Comprobando…",
+  checkNow: "Comprobar ahora",
+  operationsSummary: "Resumen de operaciones",
+  refreshHealth: "Estado de actualización",
+  sinceLastSuccess: "Desde la última correcta",
+  waitingForLiveStatus: "Esperando el estado en vivo",
+  openForecasts: "Pronósticos abiertos",
+  futureOutcomesCollecting: "Resultados futuros aún recopilándose",
+  articleReviews: "Revisiones de artículos",
+  balancedRatesUnlocked: "Tasas de calidad equilibradas disponibles",
+  reviewBalanceNeeded: "Aún se necesita equilibrar revisiones fuertes y bloqueadas",
+  reviewMinimumRemaining: "Faltan {count} para el mínimo total; también se requiere equilibrio",
+  modelHoldout: "Reserva del modelo",
+  oneLaterRow: "1 fila posterior",
+  laterRows: "{count} filas posteriores",
+  operatingChecks: "Comprobaciones operativas",
+  liveSystemChecklist: "Lista de comprobación del sistema en vivo",
+  healthy: "Correcto",
+  checkStatus: "Comprobar estado",
+  controlsReadOnly: "La página comprueba la API local cada minuto. Ningún control operativo puede modificar ni eliminar datos.",
+  localApi: "API local",
+  connected: "Conectada",
+  snapshotFallback: "Instantánea de respaldo",
+  dataRefresh: "Actualización de datos cada 15 minutos",
+  statusUnavailable: "Estado no disponible",
+  refreshRunning: "Actualización en curso",
+  refreshCompleted: "Actualización completada",
+  refreshNeedsAttention: "La actualización requiere atención",
+  dashboardSnapshot: "Instantánea del panel",
+  chronologicalModel: "Modelo cronológico",
+  benchmarkReady: "Referencia lista",
+  unavailable: "No disponible",
+  articleFilterEvaluation: "Evaluación del filtro de artículos",
+  resolvedOf: "{resolved} de {minimum} resueltas",
+  nextRefreshExpected: "Próxima actualización prevista",
+  filesProcessed: "Archivos procesados en la última ejecución",
+  permanentArchive: "Archivo permanente de artículos",
+  archiveRunDetails: "{bytes} comprimidos · {count} nuevos en la última ejecución",
+  preservedBeforeRotation: "Conservado antes de rotar los datos sin procesar",
+  titleBackfillDetails: "{added} títulos añadidos en la última ejecución · {remaining} pendientes",
+  oneTitleBackfill: "1 título añadido en la última ejecución · {remaining} pendientes",
+  titleBackfillPending: "Relleno gradual de títulos pendiente",
+  rawArchiveUsage: "Uso del archivo sin procesar",
+  filesRetained: "{count} archivos conservados",
+  oneFileRetained: "1 archivo conservado",
+  storageBudget: "Presupuesto de almacenamiento de 10 GB",
+  reliabilityCheck: "Comprobación de confiabilidad de 48 horas",
+  checkingReadiness: "Comprobando preparación",
+  goPrivatePilot: "Adelante: listo para configurar el piloto privado",
+  checkRestarted: "Comprobación reiniciada",
+  keepObserving: "Seguir observando",
+  checkingReliabilityRecord: "Comprobando el registro de confiabilidad en vivo.",
+  readinessUnavailableHeading: "El estado de preparación en vivo no está disponible.",
+  reliabilityPassed: "La comprobación de confiabilidad local fue superada.",
+  reliabilityRestarted: "La comprobación de confiabilidad de 48 horas se reinició.",
+  latestCollectionAttention: "La recopilación más reciente requiere atención.",
+  firstRefreshStartsClock: "La primera actualización completada inicia el reloj.",
+  backupStillOpen: "La confiabilidad fue aprobada; falta verificar la copia de seguridad.",
+  keepComputerRunning: "Mantenga esta computadora y Docker en funcionamiento.",
+  noGoWithoutStatus: "CrisisPulse no mostrará un resultado de aprobación hasta que esté disponible el estado de administración en vivo.",
+  readyForPrivateSetup: "La recopilación local es suficientemente confiable para comenzar a configurar el servidor privado y el inicio de sesión.",
+  restartedSummary: "Una actualización fallida, omitida o desactualizada inició una nueva ventana de observación ininterrumpida.",
+  evidenceFailClosed: "El registro de confiabilidad permanece bloqueado hasta que una actualización actual termine correctamente.",
+  noElapsedBeforeRefresh: "No se cuenta tiempo hasta registrar una actualización programada completada.",
+  backupRequired: "La ventana de recopilación terminó. También debe verificarse una copia de seguridad legible.",
+  progressWhileRunning: "El progreso avanza con las actualizaciones programadas completadas; el tiempo con la PC apagada no cuenta.",
+  waiting: "Esperando",
+  stale: "Desactualizado",
+  current: "Actual",
+  outOfDate: "Vencida",
+  verified: "Verificada",
+  failed: "Fallida",
+  notChecked: "Sin comprobar",
+  observed: "{duration} observados",
+  remaining: "{duration} restantes",
+  reliabilityProgress: "Progreso de la comprobación de confiabilidad de 48 horas",
+  windowComplete: "{percent}% de la ventana ininterrumpida completada",
+  progressUnavailable: "Progreso no disponible",
+  refreshSuccessRate: "Tasa de actualizaciones correctas",
+  intervalsCovered: "{covered} de {expected} intervalos de 15 minutos cubiertos",
+  oneIntervalCovered: "{covered} de 1 intervalo de 15 minutos cubierto",
+  waitingFirstRefresh: "Esperando la primera actualización completada",
+  recordedProblems: "Problemas registrados",
+  problemTotals: "{failed} fallidas · {missed} omitidas · {interrupted} interrumpidas desde el inicio del seguimiento",
+  failureTotalsUnavailable: "Totales de fallos no disponibles",
+  currentFreshness: "Actualidad de los datos",
+  lastCompleted: "Última completada: {time}",
+  noCompletedRefresh: "No se registró ninguna actualización completada",
+  safetyBackup: "Copia de seguridad",
+  backupVerifiedAt: "Verificada: {time}",
+  backupAge: " · hace {hours} h",
+  backupCheckFailed: "La última comprobación de la copia de seguridad falló",
+  backupNotConfirmed: "No se confirmó una copia de seguridad legible",
+  openReadinessChecks: "Comprobaciones de preparación pendientes",
+  readinessScope: "Superar esta comprobación permite que CrisisPulse avance a la configuración del servidor privado y el inicio de sesión. No publica el sitio ni concede acceso público.",
+  blockerSoakNotStarted: "La primera actualización completada aún debe iniciar la comprobación de 48 horas.",
+  blockerSoakInProgress: "La comprobación ininterrumpida de confiabilidad de 48 horas sigue en curso.",
+  blockerSoakFailed: "La comprobación de confiabilidad se reinició después de un problema de actualización.",
+  blockerEvidenceMismatch: "El registro de confiabilidad no coincide con la última actualización completada.",
+  blockerRefreshStale: "La última actualización programada tiene más de 30 minutos.",
+  blockerRefreshUnhealthy: "La recopilación más reciente no terminó correctamente.",
+  blockerCoverage: "Se omitieron demasiadas actualizaciones programadas durante esta comprobación.",
+  blockerBackupNotVerified: "Aún debe verificarse una copia de seguridad legible.",
+  blockerBackupFailed: "La última comprobación de la copia de seguridad falló.",
+  blockerBackupOld: "La última copia de seguridad verificada tiene más de 26 horas.",
+  blockerReliability: "La confiabilidad de la recopilación local aún no fue aprobada.",
+  blockerFallback: "Una comprobación de preparación aún requiere atención.",
+  forecastOperations: "Operaciones de pronóstico",
+  forecastHeading: "Relojes abiertos y referencia del modelo",
+  readOnly: "Solo lectura",
+  region: "Región",
+  detected: "Detectado",
+  outcomeCloses: "Cierre del resultado",
+  remainingColumn: "Restante",
+  modelScore: "Puntuación del modelo",
+  storiesDomains: "{stories} {storyUnit} · {domains} {domainUnit}",
+  story: "historia",
+  stories: "historias",
+  domain: "dominio",
+  domains: "dominios",
+  noPendingForecasts: "Actualmente no hay resultados de pronóstico pendientes.",
+  laterHoldout: "Reserva posterior",
+  averagePrecision: "Precisión media",
+  alertPrecision: "Precisión de alertas",
+  outcomeRecall: "Cobertura de resultados",
+  falseAlertsDay: "Alertas falsas/día",
+  testPositives: "Positivos de prueba",
+  benchmarkCaveat: "Referencia exploratoria de propagación mediática; no representa la probabilidad de desastre ni una validación de producción.",
+  filterValidation: "Validación del filtro de artículos",
+  qualityHeading: "Revise ejemplos reales, incluso cuando no haya alertas.",
+  qualityDescription: "Una muestra diaria equilibrada mide por separado las coincidencias fuertes de inundación y las historias bloqueadas por los filtros de seguridad.",
+  downloadReviews: "Descargar revisiones (.csv)",
+  measurementProgress: "Progreso de medición",
+  measurementsReady: "Las primeras mediciones del filtro están listas.",
+  ratesLocked: "Las tasas permanecen bloqueadas hasta que la muestra sea fiable.",
+  resolvedLabel: "etiqueta de artículo resuelta",
+  resolvedLabels: "etiquetas de artículos resueltas",
+  resolvedProgress: "Progreso de revisión de artículos resueltos",
+  balancedMinimum: "Se alcanzó el mínimo equilibrado de coincidencias fuertes y bloqueadas.",
+  totalMinimumBalance: "Se alcanzó el mínimo total; aún hay que equilibrar las etiquetas fuertes y bloqueadas.",
+  decisionsRemaining: "Faltan {count} decisiones de relevante o no relevante, equilibradas entre coincidencias fuertes y bloqueadas.",
+  oneDecisionRemaining: "Falta 1 decisión de relevante o no relevante, equilibrada entre coincidencias fuertes y bloqueadas.",
+  strongMatchRelevance: "Relevancia de coincidencias fuertes",
+  strongResolved: "{count} coincidencias fuertes resueltas",
+  oneStrongResolved: "1 coincidencia fuerte resuelta",
+  blockedRelevance: "Relevantes entre las bloqueadas",
+  blockedResolved: "{count} coincidencias bloqueadas resueltas",
+  oneBlockedResolved: "1 coincidencia bloqueada resuelta",
+  qualityCaveat: "Como esta muestra está equilibrada deliberadamente, estas son comprobaciones separadas del filtro, no una afirmación de exactitud general.",
+  reviewGuide: "Cómo revisar un artículo",
+  openPublisher: "Abrir la historia del editor",
+  openPublisherHelp: "Use el enlace del titular y lea lo suficiente para identificar el tema real.",
+  judgeFlooding: "Evaluar la inundación física",
+  judgeFloodingHelp: "Elija Inundación relevante solo cuando el artículo describa una inundación real o su respuesta.",
+  honestUncertainty: "Mantener la incertidumbre honesta",
+  honestUncertaintyHelp: "Elija No relevante para historias metafóricas o no relacionadas; use Dudoso cuando la evidencia sea insuficiente.",
+  answerSaved: "Respuesta guardada",
+  notSaved: "No se guardó",
+  relevantFlood: "Inundación relevante",
+  notRelevant: "No relevante",
+  uncertain: "Dudoso",
+  relevant: "Relevante",
+  needsReview: "Necesita revisión",
+  savingAnswer: "Guardando respuesta",
+  saving: "Guardando…",
+  noQueueRemaining: "No quedan artículos en la cola de hoy.",
+  oneQueueRemaining: "1 artículo aún necesita revisión.",
+  manyQueueRemaining: "{count} artículos aún necesitan revisión.",
+  savedUncertain: "Guardado como {decision}. Pasó a Revisados, pero las respuestas dudosas no cuentan para las 20 etiquetas resueltas. {remaining}",
+  savedResolved: "Guardado como {decision}. La tarjeta se eliminó de Necesita revisión. {remaining}",
+  sampleChanged: "La muestra diaria cambió antes de guardar la respuesta. La lista se está actualizando; elija de nuevo.",
+  saveFailed: "Esta respuesta no se guardó. Inténtelo de nuevo; si continúa, seleccione Comprobar ahora para confirmar que el servicio local está conectado.",
+  oneNeedsReview: "artículo necesita revisión",
+  manyNeedReview: "artículos necesitan revisión",
+  hideReviewed: "Ocultar revisados",
+  showReviewed: "Mostrar revisados ({count})",
+  strongMatch: "Coincidencia fuerte",
+  headlineConflict: "Conflicto de titular",
+  ambiguousMatch: "Coincidencia ambigua",
+  manualTitle: "Título del editor verificado manualmente",
+  publisherTitle: "Título proporcionado por el editor",
+  urlTitle: "Limpiado de la URL del editor",
+  unavailableTitle: "No hay un título confiable disponible",
+  unrecordedTitle: "Fuente del título no registrada",
+  highMatchReason: "Tema explícito de inundación; puede contribuir a las alertas",
+  conflictReason: "El titular contradice la etiqueta de inundación; bloqueado para alertas",
+  ambiguousReason: "Etiqueta de inundación ambigua; conservada para auditoría, pero bloqueada para alertas",
+  publisher: "Editor",
+  unknown: "Desconocido",
+  location: "Ubicación",
+  unassignedLocation: "No asignada con confianza",
+  seen: "Visto",
+  savingThisAnswer: "Guardando esta respuesta…",
+  reviewArticle: "Revisar {title}",
+  queueClear: "La cola de revisión de hoy no tiene tarjetas pendientes.",
+  queueClearHelp: "Cada artículo de la muestra tiene una respuesta. Las mediciones generales solo se habilitan tras una muestra equilibrada; use Mostrar revisados si necesita corregir una.",
+  samplePending: "La primera muestra diaria respaldada por el archivo aparecerá después de la próxima actualización.",
+  safeByDesign: "Seguro por diseño.",
+  safetyDescription: "Las decisiones de revisión son de solo anexado. Esta página no puede eliminar datos, reiniciar servicios, cambiar la facturación ni emitir una alerta de emergencia.",
+  sampleDetails: "Muestra: {sampled} {articleUnit} de {archived} {recordUnit} del archivo permanente el {date}.",
+  article: "artículo",
+  articles: "artículos",
+  record: "registro",
+  records: "registros",
+  waitingLiveSample: "Esperando una muestra en vivo.",
+});
 
 type DashboardData = typeof bundledDashboardData;
 type ArticleDecision = "relevant" | "not_relevant" | "uncertain";
@@ -123,20 +588,26 @@ type AdminStatus = {
   pilot_readiness?: PilotReadiness;
 };
 
-const formatNumber = (value: number) => value.toLocaleString("en-US");
-const formatBytes = (value: number | null | undefined) => {
+type MessageKey = keyof typeof messages.en;
+
+const formatNumber = (value: number, localeTag: string) => value.toLocaleString(localeTag);
+const formatBytes = (value: number | null | undefined, localeTag: string) => {
   if (value === null || value === undefined || value < 0) return "—";
-  if (value >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(1)} GB`;
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)} MB`;
-  if (value >= 1_000) return `${(value / 1_000).toFixed(1)} KB`;
-  return `${value} B`;
+  const compact = (amount: number) => new Intl.NumberFormat(localeTag, {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  }).format(amount);
+  if (value >= 1_000_000_000) return `${compact(value / 1_000_000_000)} GB`;
+  if (value >= 1_000_000) return `${compact(value / 1_000_000)} MB`;
+  if (value >= 1_000) return `${compact(value / 1_000)} KB`;
+  return `${formatNumber(value, localeTag)} B`;
 };
-const formatEastern = (value: string) => {
+const formatEastern = (value: string, localeTag: string) => {
   if (!value) return "—";
   const hasExplicitTimezone = /(?:Z|[+-]\d{2}:\d{2})$/i.test(value);
   const date = new Date(hasExplicitTimezone ? value : `${value}Z`);
   if (Number.isNaN(date.getTime())) return "—";
-  return date.toLocaleString("en-US", {
+  return date.toLocaleString(localeTag, {
     month: "short",
     day: "numeric",
     hour: "numeric",
@@ -145,47 +616,48 @@ const formatEastern = (value: string) => {
     timeZoneName: "short",
   });
 };
-const formatPercent = (value: number | null | undefined) =>
-  value === null || value === undefined ? "—" : `${(value * 100).toFixed(1)}%`;
+const formatPercent = (value: number | null | undefined, localeTag: string) =>
+  value === null || value === undefined
+    ? "—"
+    : new Intl.NumberFormat(localeTag, {
+      style: "percent",
+      minimumFractionDigits: 1,
+      maximumFractionDigits: 1,
+    }).format(value);
 const clampPercent = (value: number | null | undefined) =>
   value === null || value === undefined || !Number.isFinite(value)
     ? 0
     : Math.min(100, Math.max(0, value));
-const formatDuration = (value: number | null | undefined) => {
+const formatDuration = (value: number | null | undefined, localeTag: string) => {
   if (value === null || value === undefined || !Number.isFinite(value)) return "—";
   const minutes = Math.max(0, Math.round(value));
   const hours = Math.floor(minutes / 60);
   const remainder = minutes % 60;
-  if (hours === 0) return `${remainder}m`;
-  if (remainder === 0) return `${hours}h`;
-  return `${hours}h ${remainder}m`;
+  if (hours === 0) return `${formatNumber(remainder, localeTag)}m`;
+  if (remainder === 0) return `${formatNumber(hours, localeTag)}h`;
+  return `${formatNumber(hours, localeTag)}h ${formatNumber(remainder, localeTag)}m`;
+};
+const formatSampleDate = (value: string, localeTag: string) => {
+  const date = new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString(localeTag, {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    timeZone: "UTC",
+  });
 };
 const safeCount = (value: number | null | undefined) =>
   value === null || value === undefined || !Number.isFinite(value)
     ? 0
     : Math.max(0, Math.round(value));
-const readinessBlockerLabels: Record<string, string> = {
-  soak_not_started: "The first completed refresh still needs to start the 48-hour check.",
-  soak_in_progress: "The uninterrupted 48-hour reliability check is still running.",
-  soak_failed: "The reliability check restarted after a refresh problem.",
-  soak_evidence_mismatch: "The reliability record does not match the latest completed refresh.",
-  refresh_stale: "The latest scheduled refresh is more than 30 minutes old.",
-  refresh_unhealthy: "The latest collection has not completed successfully.",
-  coverage_below_target: "Too many scheduled refreshes were missed during this check.",
-  backup_not_verified: "A readable safety backup still needs to be verified.",
-  backup_failed: "The latest safety-backup check did not pass.",
-  backup_too_old: "The last verified safety backup is more than 26 hours old.",
-  local_reliability_not_passed: "Local collection reliability has not passed yet.",
-  local_reliability: "Local collection reliability has not passed yet.",
-  verified_backup: "A readable safety backup still needs to be verified.",
-};
 const qualityArticlesURL = "/api/v1/quality/articles";
 const qualitySummaryURL = "/api/v1/quality/articles/summary";
 const qualityExportURL = "/api/v1/quality/articles/export.csv";
-const articleReviewOptions: Array<{ value: ArticleDecision; label: string; tone: string }> = [
-  { value: "relevant", label: "Relevant flood", tone: "confirmed" },
-  { value: "not_relevant", label: "Not relevant", tone: "irrelevant" },
-  { value: "uncertain", label: "Uncertain", tone: "uncertain" },
+const articleReviewOptions: Array<{ value: ArticleDecision; labelKey: MessageKey; tone: string }> = [
+  { value: "relevant", labelKey: "relevantFlood", tone: "confirmed" },
+  { value: "not_relevant", labelKey: "notRelevant", tone: "irrelevant" },
+  { value: "uncertain", labelKey: "uncertain", tone: "uncertain" },
 ];
 const safeArticleURL = (value: string) => {
   try {
@@ -218,6 +690,11 @@ const fetchJSONWithTimeout = async <T,>(
 };
 
 export default function AdminPage() {
+  const { locale, localeTag } = useLocale();
+  const pageMessages = messages[locale];
+  const t = (key: MessageKey, values: Record<string, string | number> = {}) => (
+    formatMessage(pageMessages[key], values)
+  );
   const [dashboardData, setDashboardData] = useState<DashboardData>(bundledDashboardData);
   const [qualitySample, setQualitySample] = useState<QualitySample | null>(null);
   const [qualitySummary, setQualitySummary] = useState<ArticleQualitySummary | null>(null);
@@ -239,6 +716,17 @@ export default function AdminPage() {
   const visibleQualityArticles = showReviewedArticles
     ? qualitySample?.articles ?? []
     : pendingQualityArticles;
+
+  useEffect(() => {
+    document.title = pageMessages.documentTitle;
+    let description = document.querySelector<HTMLMetaElement>('meta[name="description"]');
+    if (!description) {
+      description = document.createElement("meta");
+      description.name = "description";
+      document.head.appendChild(description);
+    }
+    description.content = pageMessages.documentDescription;
+  }, [pageMessages.documentDescription, pageMessages.documentTitle]);
 
   const refreshAdmin = useCallback(async (signal?: AbortSignal) => {
     if (requestInFlight.current) return;
@@ -368,24 +856,27 @@ export default function AdminPage() {
           ? { ...item, decision: payload.review.decision, reviewed_at: payload.review.reviewed_at }
           : item),
       } : current);
-      const decisionLabel = articleReviewOptions.find((option) => option.value === decision)?.label ?? decision;
+      const decisionKey = articleReviewOptions.find((option) => option.value === decision)?.labelKey;
+      const decisionLabel = decisionKey ? t(decisionKey) : decision;
       const pendingAfterSave = Math.max(0, pendingQualityArticles.length - (article.decision ? 0 : 1));
       const remainingCopy = pendingAfterSave === 0
-        ? "No articles in today’s queue remain."
-        : `${pendingAfterSave} ${pendingAfterSave === 1 ? "article" : "articles"} still need review.`;
+        ? t("noQueueRemaining")
+        : pendingAfterSave === 1
+          ? t("oneQueueRemaining")
+          : t("manyQueueRemaining", { count: formatNumber(pendingAfterSave, localeTag) });
       setQualityNotice({
         kind: "success",
         message: decision === "uncertain"
-          ? `Saved as ${decisionLabel}. It moved to Reviewed, but uncertain answers do not count toward the 20 resolved labels. ${remainingCopy}`
-          : `Saved as ${decisionLabel}. The card was removed from Needs review. ${remainingCopy}`,
+          ? t("savedUncertain", { decision: decisionLabel, remaining: remainingCopy })
+          : t("savedResolved", { decision: decisionLabel, remaining: remainingCopy }),
       });
       void refreshQualitySummary();
     } catch {
       setQualityNotice({
         kind: "error",
         message: sampleChanged
-          ? "This daily sample changed before the answer was saved. The list is refreshing; please choose again."
-          : "This answer was not saved. Please try again; if it continues, select Check now to confirm the local service is connected.",
+          ? t("sampleChanged")
+          : t("saveFailed"),
       });
     } finally {
       reviewRequestInFlight.current = false;
@@ -397,10 +888,10 @@ export default function AdminPage() {
   const modelReady = forecast.model.status === "ready";
   const refreshHealthy = adminStatusAvailability === "ready" && adminStatus?.refresh.health === "healthy";
   const overallStatus = refreshHealthy && modelReady
-    ? "Operating normally"
+    ? t("operatingNormally")
     : adminStatusAvailability === "offline"
-      ? "Operations status unavailable"
-      : "Attention needed";
+      ? t("operationsStatusUnavailable")
+      : t("attentionNeeded");
   const resolvedReviews = qualitySummary?.resolved_reviews ?? 0;
   const minimumReviews = qualitySummary?.minimum_sample ?? 20;
   const remainingReviews = qualitySummary?.remaining_to_sample ?? Math.max(0, minimumReviews - resolvedReviews);
@@ -442,12 +933,12 @@ export default function AdminPage() {
     ),
   );
   const readinessDecision = !readinessAvailable
-    ? adminStatusAvailability === "loading" ? "Checking readiness" : "Status unavailable"
+    ? adminStatusAvailability === "loading" ? t("checkingReadiness") : t("statusUnavailable")
     : readyForPilotSetup
-      ? "Go: ready for private pilot setup"
+      ? t("goPrivatePilot")
       : checkRestarted
-        ? "Check restarted"
-        : "Keep observing";
+        ? t("checkRestarted")
+        : t("keepObserving");
   const readinessTone = !readinessAvailable
     ? "unavailable"
     : readyForPilotSetup
@@ -457,32 +948,32 @@ export default function AdminPage() {
         : "observing";
   const readinessHeading = !readinessAvailable
     ? adminStatusAvailability === "loading"
-      ? "Checking the live reliability record."
-      : "Live readiness status is unavailable."
+      ? t("checkingReliabilityRecord")
+      : t("readinessUnavailableHeading")
     : readyForPilotSetup
-      ? "The local reliability check passed."
+      ? t("reliabilityPassed")
       : checkRestarted
-        ? "The 48-hour reliability check restarted."
+        ? t("reliabilityRestarted")
         : refreshEvidenceBlocked
-          ? "The latest collection needs attention."
+          ? t("latestCollectionAttention")
         : soak?.status === "not_started"
-          ? "The first completed refresh starts the clock."
+          ? t("firstRefreshStartsClock")
           : soak?.status === "passed"
-            ? "Reliability passed; backup verification is still open."
-            : "Keep this computer and Docker running.";
+            ? t("backupStillOpen")
+            : t("keepComputerRunning");
   const readinessSummary = !readinessAvailable
-    ? "CrisisPulse will not report a Go result until the live admin status is available."
+    ? t("noGoWithoutStatus")
     : readyForPilotSetup
-      ? "Local collection is reliable enough to begin private server and sign-in setup."
+      ? t("readyForPrivateSetup")
       : checkRestarted
-        ? "A failed, missed, or stale refresh started a new uninterrupted observation window."
+        ? t("restartedSummary")
         : refreshEvidenceBlocked
-          ? "The reliability record remains fail-closed until a current refresh completes successfully."
+          ? t("evidenceFailClosed")
         : soak?.status === "not_started"
-          ? "No elapsed time is counted until a completed scheduled refresh is recorded."
+          ? t("noElapsedBeforeRefresh")
           : soak?.status === "passed"
-            ? "The collection window is complete. A readable safety backup must also be verified."
-            : "Progress advances with completed scheduled refreshes; time while the PC is off does not count.";
+            ? t("backupRequired")
+            : t("progressWhileRunning");
   const soakProgress = readinessAvailable ? clampPercent(soak?.progress_percent) : 0;
   const expectedRuns = safeCount(soak?.expected_runs);
   const successfulRuns = safeCount(soak?.successful_runs);
@@ -492,25 +983,47 @@ export default function AdminPage() {
   const interruptedRuns = safeCount(soak?.interrupted_runs);
   const problemRuns = failedRuns + missedRuns + interruptedRuns;
   const coverageLabel = readinessAvailable && expectedRuns > 0
-    ? `${clampPercent(soak?.coverage_percent).toFixed(1)}%`
-    : "Waiting";
+    ? `${new Intl.NumberFormat(localeTag, { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(clampPercent(soak?.coverage_percent))}%`
+    : t("waiting");
   const freshnessLabel = !readinessAvailable || !soak?.last_observed_at
-    ? "Waiting"
+    ? t("waiting")
     : soak.current_stale
-      ? "Stale"
-      : "Current";
+      ? t("stale")
+      : t("current");
   const backupLabel = !readinessAvailable
-    ? "Unavailable"
+    ? t("unavailable")
     : backup?.status === "verified"
-      ? safeCount(backup.age_hours) >= 26 ? "Out of date" : "Verified"
+      ? safeCount(backup.age_hours) >= 26 ? t("outOfDate") : t("verified")
       : backup?.status === "failed"
-        ? "Failed"
-        : "Not checked";
+        ? t("failed")
+        : t("notChecked");
+  const readinessBlockerKeys: Record<string, MessageKey> = {
+    soak_not_started: "blockerSoakNotStarted",
+    soak_in_progress: "blockerSoakInProgress",
+    soak_failed: "blockerSoakFailed",
+    soak_evidence_mismatch: "blockerEvidenceMismatch",
+    refresh_stale: "blockerRefreshStale",
+    refresh_unhealthy: "blockerRefreshUnhealthy",
+    coverage_below_target: "blockerCoverage",
+    backup_not_verified: "blockerBackupNotVerified",
+    backup_failed: "blockerBackupFailed",
+    backup_too_old: "blockerBackupOld",
+    local_reliability_not_passed: "blockerReliability",
+    local_reliability: "blockerReliability",
+    verified_backup: "blockerBackupNotVerified",
+  };
   const readinessBlockers = Array.from(new Set(
     (pilotReadiness?.blockers ?? []).map(
-      (blocker) => readinessBlockerLabels[blocker] ?? "One readiness check still needs attention.",
+      (blocker) => t(readinessBlockerKeys[blocker] ?? "blockerFallback"),
     ),
   )).slice(0, 3);
+  const refreshStatusMessage = !adminStatus
+    ? t("statusUnavailable")
+    : adminStatus.refresh.status === "running"
+      ? t("refreshRunning")
+      : adminStatus.refresh.status === "success"
+        ? t("refreshCompleted")
+        : t("refreshNeedsAttention");
   const modelPredictions = new Map(
     forecast.model.pending_predictions.map((prediction) => [
       `${prediction.region_code}|${prediction.window_start}`,
@@ -521,102 +1034,100 @@ export default function AdminPage() {
   return (
     <main className="admin-page">
       <header className="site-header">
-        <Link className="brand" href="/" aria-label="CrisisPulse dashboard home">
+        <Link className="brand" href="/" aria-label={t("brandHome")}>
           <span className="brand-mark" aria-hidden="true"><i /><i /><i /></span>
           <span>CrisisPulse</span>
         </Link>
-        <nav className="header-nav" aria-label="Primary navigation">
-          <Link href="/">Dashboard</Link>
-          <Link className="active" href="/admin">Admin</Link>
+        <nav className="header-nav" aria-label={t("primaryNavigation")}>
+          <Link href="/">{t("dashboard")}</Link>
+          <Link className="active" href="/admin">{t("admin")}</Link>
         </nav>
         <div className="header-meta">
           <span className={connection === "ready" ? "live-dot" : "live-dot snapshot"} aria-hidden="true" />
-          {connection === "ready" ? "Live operations" : connection === "loading" ? "Checking operations" : "Verified snapshot"}
-          <strong>{formatEastern(snapshot.window_end)}</strong>
+          {connection === "ready" ? t("liveOperations") : connection === "loading" ? t("checkingOperations") : t("verifiedSnapshot")}
+          <strong>{formatEastern(snapshot.window_end, localeTag)}</strong>
         </div>
+        <LanguageSwitcher />
       </header>
 
-      <nav className="mobile-section-nav" aria-label="Admin sections">
-        <a href="#status">Status</a>
-        <a href="#operations">Operations</a>
-        <a href="#admin-forecast">Forecasts</a>
-        <a href="#article-quality">Quality</a>
+      <nav className="mobile-section-nav" aria-label={t("adminSections")}>
+        <a href="#status">{t("status")}</a>
+        <a href="#operations">{t("operations")}</a>
+        <a href="#admin-forecast">{t("forecasts")}</a>
+        <a href="#article-quality">{t("quality")}</a>
       </nav>
 
       <section className="admin-hero" id="status">
         <div className="admin-hero-copy">
-          <p className="eyebrow">Operations console</p>
-          <h1>Know what is working before customers do.</h1>
-          <p>
-            One private view for data freshness, forecasts, model health, human
-            review, and the work remaining before a reliable paid pilot.
-          </p>
+          <p className="eyebrow">{t("operationsConsole")}</p>
+          <h1>{t("heroTitle")}</h1>
+          <p>{t("heroDescription")}</p>
         </div>
-        <aside className={`admin-health ${refreshHealthy ? "healthy" : "attention"}`} aria-label="Current system health">
-          <span><i className="admin-status-dot" /> Current status</span>
+        <aside className={`admin-health ${refreshHealthy ? "healthy" : "attention"}`} aria-label={t("currentSystemHealth")}>
+          <span><i className="admin-status-dot" /> {t("currentStatus")}</span>
           <strong>{overallStatus}</strong>
           <p>
             {adminStatus
-              ? `Last successful refresh ${formatEastern(adminStatus.refresh.last_success_at)}.`
-              : `Latest retained data ${formatEastern(snapshot.window_end)}.`}
-            {" "}Times are shown in U.S. Eastern Time.
+              ? t("lastSuccessfulRefresh", { time: formatEastern(adminStatus.refresh.last_success_at, localeTag) })
+              : t("latestRetainedData", { time: formatEastern(snapshot.window_end, localeTag) })}
+            {" "}{t("easternTime")}
           </p>
           <button className="admin-check-button" disabled={checking} onClick={() => void refreshAdmin()} type="button">
-            {checking ? "Checking…" : "Check now"}
+            {checking ? t("checking") : t("checkNow")}
           </button>
         </aside>
       </section>
 
-      <section className="admin-summary" aria-label="Operations summary">
+      <section className="admin-summary" aria-label={t("operationsSummary")}>
         <article>
-          <span>Refresh health</span>
-          <strong>{adminStatus ? `${adminStatus.refresh.age_minutes}m` : "—"}</strong>
-          <small>{refreshHealthy ? "Since last success" : "Waiting for live status"}</small>
+          <span>{t("refreshHealth")}</span>
+          <strong>{adminStatus ? `${formatNumber(adminStatus.refresh.age_minutes, localeTag)}m` : "—"}</strong>
+          <small>{refreshHealthy ? t("sinceLastSuccess") : t("waitingForLiveStatus")}</small>
         </article>
         <article>
-          <span>Open forecasts</span>
-          <strong>{forecast.pending_predictions.length}</strong>
-          <small>Future outcomes still collecting</small>
+          <span>{t("openForecasts")}</span>
+          <strong>{formatNumber(forecast.pending_predictions.length, localeTag)}</strong>
+          <small>{t("futureOutcomesCollecting")}</small>
         </article>
         <article>
-          <span>Article reviews</span>
-          <strong>{resolvedReviews}/{minimumReviews}</strong>
-          <small>{qualitySampleReady ? "Balanced quality rates unlocked" : qualityBalancePending ? "Strong and blocked review balance still needed" : `${remainingReviews} until the total minimum; balance also required`}</small>
+          <span>{t("articleReviews")}</span>
+          <strong>{formatNumber(resolvedReviews, localeTag)}/{formatNumber(minimumReviews, localeTag)}</strong>
+          <small>{qualitySampleReady ? t("balancedRatesUnlocked") : qualityBalancePending ? t("reviewBalanceNeeded") : t("reviewMinimumRemaining", { count: formatNumber(remainingReviews, localeTag) })}</small>
         </article>
         <article>
-          <span>Model holdout</span>
-          <strong>{forecast.model.test_hours}h</strong>
-          <small>{formatNumber(forecast.model.test_rows)} later rows</small>
+          <span>{t("modelHoldout")}</span>
+          <strong>{formatNumber(forecast.model.test_hours, localeTag)}h</strong>
+          <small>{t("laterRows", { count: formatNumber(forecast.model.test_rows, localeTag) })}</small>
         </article>
       </section>
 
       <section className="admin-overview" id="operations">
         <article className="admin-surface">
           <div className="admin-section-heading">
-            <div><p className="eyebrow">Operating checks</p><h2>Live system checklist</h2></div>
-            <span className={refreshHealthy ? "admin-pill ready" : "admin-pill"}>{refreshHealthy ? "Healthy" : "Check status"}</span>
+            <div><p className="eyebrow">{t("operatingChecks")}</p><h2>{t("liveSystemChecklist")}</h2></div>
+            <span className={refreshHealthy ? "admin-pill ready" : "admin-pill"}>{refreshHealthy ? t("healthy") : t("checkStatus")}</span>
           </div>
-          <p>The page checks the local API every minute. No operational control here can alter or delete data.</p>
+          <p>{t("controlsReadOnly")}</p>
           <ul className="admin-checks">
-            <li><i className={connection === "ready" ? "" : "waiting"} /><strong>Local API</strong><span>{connection === "ready" ? "Connected" : "Snapshot fallback"}</span></li>
-            <li><i className={refreshHealthy ? "" : "waiting"} /><strong>15-minute data refresh</strong><span>{adminStatus ? adminStatus.refresh.message : "Status unavailable"}</span></li>
-            <li><i /><strong>Dashboard snapshot</strong><span>{formatEastern(snapshot.window_end)}</span></li>
-            <li><i className={modelReady ? "" : "waiting"} /><strong>Chronological model</strong><span>{modelReady ? "Benchmark ready" : "Unavailable"}</span></li>
-            <li><i className={qualitySampleReady ? "" : "waiting"} /><strong>Article filter evaluation</strong><span>{resolvedReviews} of {minimumReviews} resolved</span></li>
+            <li><i className={connection === "ready" ? "" : "waiting"} /><strong>{t("localApi")}</strong><span>{connection === "ready" ? t("connected") : t("snapshotFallback")}</span></li>
+            <li><i className={refreshHealthy ? "" : "waiting"} /><strong>{t("dataRefresh")}</strong><span>{refreshStatusMessage}</span></li>
+            <li><i /><strong>{t("dashboardSnapshot")}</strong><span>{formatEastern(snapshot.window_end, localeTag)}</span></li>
+            <li><i className={modelReady ? "" : "waiting"} /><strong>{t("chronologicalModel")}</strong><span>{modelReady ? t("benchmarkReady") : t("unavailable")}</span></li>
+            <li><i className={qualitySampleReady ? "" : "waiting"} /><strong>{t("articleFilterEvaluation")}</strong><span>{t("resolvedOf", { resolved: formatNumber(resolvedReviews, localeTag), minimum: formatNumber(minimumReviews, localeTag) })}</span></li>
           </ul>
           <div className="admin-detail-grid">
-            <div><span>Next refresh expected</span><strong>{adminStatus ? formatEastern(adminStatus.refresh.expected_next_refresh_at) : "—"}</strong></div>
-            <div><span>Files processed last run</span><strong>{adminStatus?.refresh.processed_files ?? "—"}</strong></div>
+            <div><span>{t("nextRefreshExpected")}</span><strong>{adminStatus ? formatEastern(adminStatus.refresh.expected_next_refresh_at, localeTag) : "—"}</strong></div>
+            <div><span>{t("filesProcessed")}</span><strong>{adminStatus ? formatNumber(adminStatus.refresh.processed_files, localeTag) : "—"}</strong></div>
             <div>
-              <span>Permanent article archive</span>
-              <strong>{adminStatus?.refresh.archived_articles !== undefined ? formatNumber(adminStatus.refresh.archived_articles) : "—"}</strong>
-              <small>{adminStatus ? `${formatBytes(adminStatus.refresh.article_archive_bytes)} compressed · ${formatNumber(adminStatus.refresh.new_archived_articles ?? 0)} new last run` : "Preserved before raw rotation"}</small>
-              <small>{adminStatus ? `${formatNumber(adminStatus.refresh.title_backfill_updated_articles ?? 0)} titles added last run · ${formatNumber(adminStatus.refresh.title_backfill_remaining_articles ?? 0)} remaining` : "Gradual title backfill pending"}</small>
+              <span>{t("permanentArchive")}</span>
+              <strong>{adminStatus?.refresh.archived_articles !== undefined ? formatNumber(adminStatus.refresh.archived_articles, localeTag) : "—"}</strong>
+              <small>{adminStatus ? t("archiveRunDetails", { bytes: formatBytes(adminStatus.refresh.article_archive_bytes, localeTag), count: formatNumber(adminStatus.refresh.new_archived_articles ?? 0, localeTag) }) : t("preservedBeforeRotation")}</small>
+              <small>{adminStatus ? t("titleBackfillDetails", { added: formatNumber(adminStatus.refresh.title_backfill_updated_articles ?? 0, localeTag), remaining: formatNumber(adminStatus.refresh.title_backfill_remaining_articles ?? 0, localeTag) }) : t("titleBackfillPending")}</small>
             </div>
             <div>
-              <span>Raw archive usage</span>
-              <strong>{adminStatus ? `${formatBytes(adminStatus.refresh.retained_raw_bytes)} / ${formatBytes(adminStatus.refresh.raw_storage_limit_bytes)}` : "—"}</strong>
-              <small>{adminStatus ? `${formatNumber(adminStatus.refresh.retained_raw_files)} files retained` : "10 GB storage budget"}</small>
+              <span>{t("rawArchiveUsage")}</span>
+              <strong>{adminStatus ? `${formatBytes(adminStatus.refresh.retained_raw_bytes, localeTag)} / ${formatBytes(adminStatus.refresh.raw_storage_limit_bytes, localeTag)}` : "—"}</strong>
+              <small>{adminStatus ? t("filesRetained", { count: formatNumber(adminStatus.refresh.retained_raw_files, localeTag) }) : t("storageBudget")}</small>
             </div>
           </div>
         </article>
@@ -626,7 +1137,7 @@ export default function AdminPage() {
           aria-labelledby="pilot-readiness-heading"
         >
           <div className="admin-section-heading readiness-heading">
-            <p className="eyebrow">48-hour reliability check</p>
+            <p className="eyebrow">{t("reliabilityCheck")}</p>
             <span
               className={`admin-pill readiness-decision ${readinessTone}`}
               aria-live="polite"
@@ -640,112 +1151,115 @@ export default function AdminPage() {
 
           <div className="readiness-progress">
             <div className="readiness-timing" id="pilot-readiness-timing">
-              <strong>{readinessAvailable ? formatDuration(soak?.observed_minutes) : "—"} observed</strong>
-              <span>{readinessAvailable ? `${formatDuration(soak?.remaining_minutes)} remaining` : "Waiting for live status"}</span>
+              <strong>{readinessAvailable ? t("observed", { duration: formatDuration(soak?.observed_minutes, localeTag) }) : "—"}</strong>
+              <span>{readinessAvailable ? t("remaining", { duration: formatDuration(soak?.remaining_minutes, localeTag) }) : t("waitingForLiveStatus")}</span>
             </div>
             <progress
-              aria-label="48-hour reliability check progress"
+              aria-label={t("reliabilityProgress")}
               aria-describedby="pilot-readiness-timing"
               max={100}
               value={soakProgress}
             >
-              {soakProgress.toFixed(0)}%
+              {formatNumber(Math.round(soakProgress), localeTag)}%
             </progress>
-            <small>{readinessAvailable ? `${soakProgress.toFixed(0)}% of the uninterrupted window complete` : "Progress unavailable"}</small>
+            <small>{readinessAvailable ? t("windowComplete", { percent: formatNumber(Math.round(soakProgress), localeTag) }) : t("progressUnavailable")}</small>
           </div>
 
           <dl className="readiness-metrics">
             <div>
-              <dt>Refresh success rate</dt>
+              <dt>{t("refreshSuccessRate")}</dt>
               <dd>{coverageLabel}</dd>
               <small>
                 {readinessAvailable && expectedRuns > 0
-                  ? `${coveredIntervals} of ${expectedRuns} 15-minute intervals covered`
-                  : "Waiting for the first completed refresh"}
+                  ? t("intervalsCovered", { covered: formatNumber(coveredIntervals, localeTag), expected: formatNumber(expectedRuns, localeTag) })
+                  : t("waitingFirstRefresh")}
               </small>
             </div>
             <div>
-              <dt>Recorded problems</dt>
-              <dd>{readinessAvailable ? problemRuns : "—"}</dd>
-              <small>{readinessAvailable ? `${failedRuns} failed · ${missedRuns} missed · ${interruptedRuns} interrupted since tracking began` : "Failure totals unavailable"}</small>
+              <dt>{t("recordedProblems")}</dt>
+              <dd>{readinessAvailable ? formatNumber(problemRuns, localeTag) : "—"}</dd>
+              <small>{readinessAvailable ? t("problemTotals", { failed: formatNumber(failedRuns, localeTag), missed: formatNumber(missedRuns, localeTag), interrupted: formatNumber(interruptedRuns, localeTag) }) : t("failureTotalsUnavailable")}</small>
             </div>
             <div>
-              <dt>Current freshness</dt>
+              <dt>{t("currentFreshness")}</dt>
               <dd className={soak?.current_stale ? "attention" : ""}>{freshnessLabel}</dd>
               <small>
                 {readinessAvailable && soak?.last_observed_at
-                  ? <>Last completed <time dateTime={soak.last_observed_at}>{formatEastern(soak.last_observed_at)}</time></>
-                  : "No completed refresh recorded"}
+                  ? <>{formatMessage(pageMessages.lastCompleted, { time: "" }).trim()} <time dateTime={soak.last_observed_at}>{formatEastern(soak.last_observed_at, localeTag)}</time></>
+                  : t("noCompletedRefresh")}
               </small>
             </div>
             <div>
-              <dt>Safety backup</dt>
+              <dt>{t("safetyBackup")}</dt>
               <dd className={backup?.status === "failed" || (backup?.status === "verified" && safeCount(backup.age_hours) >= 26) ? "attention" : ""}>{backupLabel}</dd>
               <small>
                 {readinessAvailable && backup?.status === "verified" && backup.verified_at
-                  ? <>Verified <time dateTime={backup.verified_at}>{formatEastern(backup.verified_at)}</time>{backup.age_hours !== null ? ` · ${safeCount(backup.age_hours)}h old` : ""}</>
+                  ? <>{formatMessage(pageMessages.backupVerifiedAt, { time: "" }).trim()} <time dateTime={backup.verified_at}>{formatEastern(backup.verified_at, localeTag)}</time>{backup.age_hours !== null ? t("backupAge", { hours: formatNumber(safeCount(backup.age_hours), localeTag) }) : ""}</>
                   : backup?.status === "failed"
-                    ? "The latest backup check did not pass"
-                    : "A readable backup has not been confirmed"}
+                    ? t("backupCheckFailed")
+                    : t("backupNotConfirmed")}
               </small>
             </div>
           </dl>
 
           {!readyForPilotSetup && readinessBlockers.length > 0 ? (
-            <ul className="readiness-blockers" aria-label="Readiness checks still open">
+            <ul className="readiness-blockers" aria-label={t("openReadinessChecks")}>
               {readinessBlockers.map((blocker) => <li key={blocker}>{blocker}</li>)}
             </ul>
           ) : null}
-          <p className="readiness-scope">
-            Passing this check means CrisisPulse can move to private server and sign-in setup. It does not publish the site or grant public access.
-          </p>
+          <p className="readiness-scope">{t("readinessScope")}</p>
         </aside>
       </section>
 
       <section className="admin-forecast-section" id="admin-forecast" aria-labelledby="admin-forecast-heading">
         <div className="admin-section-heading">
           <div>
-            <p className="eyebrow">Forecast operations</p>
-            <h2 id="admin-forecast-heading">Open clocks and model benchmark</h2>
+            <p className="eyebrow">{t("forecastOperations")}</p>
+            <h2 id="admin-forecast-heading">{t("forecastHeading")}</h2>
           </div>
-          <span className="admin-pill ready">Read-only</span>
+          <span className="admin-pill ready">{t("readOnly")}</span>
         </div>
         <div className="admin-forecast-grid">
           <article className="admin-surface admin-forecast-table">
             {forecast.pending_predictions.length > 0 ? (
               <div className="admin-table-wrap">
                 <table className="admin-forecast-mobile-table">
-                  <thead><tr><th>Region</th><th>Detected</th><th>Outcome closes</th><th>Remaining</th><th>Model score</th></tr></thead>
+                  <thead><tr><th>{t("region")}</th><th>{t("detected")}</th><th>{t("outcomeCloses")}</th><th>{t("remainingColumn")}</th><th>{t("modelScore")}</th></tr></thead>
                   <tbody>
                     {forecast.pending_predictions.map((prediction) => {
                       const modelPrediction = modelPredictions.get(`${prediction.region_code}|${prediction.window_start}`);
                       return (
                         <tr key={`${prediction.region_code}|${prediction.window_start}`}>
-                          <td data-label="Region"><strong>{prediction.region_code}</strong><small>{prediction.stories_at_detection} stories · {prediction.domains_at_detection} domains</small></td>
-                          <td data-label="Detected">{formatEastern(prediction.window_start)}</td>
-                          <td data-label="Outcome closes">{formatEastern(prediction.matures_at)}</td>
-                          <td data-label="Remaining"><span className="admin-countdown">{prediction.hours_remaining}h</span></td>
-                          <td data-label="Model score">{modelPrediction ? `${(modelPrediction.model_score * 100).toFixed(1)} / 100` : "—"}</td>
+                          <td data-label={t("region")}><strong>{prediction.region_code}</strong><small>{t("storiesDomains", {
+                            stories: formatNumber(prediction.stories_at_detection, localeTag),
+                            storyUnit: t(prediction.stories_at_detection === 1 ? "story" : "stories"),
+                            domains: formatNumber(prediction.domains_at_detection, localeTag),
+                            domainUnit: t(prediction.domains_at_detection === 1 ? "domain" : "domains"),
+                          })}</small></td>
+                          <td data-label={t("detected")}>{formatEastern(prediction.window_start, localeTag)}</td>
+                          <td data-label={t("outcomeCloses")}>{formatEastern(prediction.matures_at, localeTag)}</td>
+                          <td data-label={t("remainingColumn")}><span className="admin-countdown">{formatNumber(prediction.hours_remaining, localeTag)}h</span></td>
+                          <td data-label={t("modelScore")}>{modelPrediction ? `${new Intl.NumberFormat(localeTag, { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(modelPrediction.model_score * 100)} / 100` : "—"}</td>
                         </tr>
                       );
                     })}
                   </tbody>
                 </table>
               </div>
-            ) : <p className="admin-empty">No forecast outcomes are currently pending.</p>}
+            ) : <p className="admin-empty">{t("noPendingForecasts")}</p>}
           </article>
 
           <aside className="admin-model-card">
-            <span>Later holdout</span>
-            <strong>{formatPercent(forecast.model.test_metrics.average_precision)}</strong>
-            <small>Average precision</small>
+            <span>{t("laterHoldout")}</span>
+            <strong>{formatPercent(forecast.model.test_metrics.average_precision, localeTag)}</strong>
+            <small>{t("averagePrecision")}</small>
             <dl>
-              <div><dt>Alert precision</dt><dd>{formatPercent(forecast.model.test_metrics.precision)}</dd></div>
-              <div><dt>Outcome recall</dt><dd>{formatPercent(forecast.model.test_metrics.recall)}</dd></div>
-              <div><dt>False alerts/day</dt><dd>{forecast.model.test_metrics.false_alerts_per_day?.toFixed(1) ?? "—"}</dd></div>
-              <div><dt>Test positives</dt><dd>{forecast.model.test_positives}</dd></div>
+              <div><dt>{t("alertPrecision")}</dt><dd>{formatPercent(forecast.model.test_metrics.precision, localeTag)}</dd></div>
+              <div><dt>{t("outcomeRecall")}</dt><dd>{formatPercent(forecast.model.test_metrics.recall, localeTag)}</dd></div>
+              <div><dt>{t("falseAlertsDay")}</dt><dd>{forecast.model.test_metrics.false_alerts_per_day === null || forecast.model.test_metrics.false_alerts_per_day === undefined ? "—" : new Intl.NumberFormat(localeTag, { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(forecast.model.test_metrics.false_alerts_per_day)}</dd></div>
+              <div><dt>{t("testPositives")}</dt><dd>{formatNumber(forecast.model.test_positives, localeTag)}</dd></div>
             </dl>
-            <p>Exploratory media-spread benchmark—not disaster probability or production validation.</p>
+            <p>{t("benchmarkCaveat")}</p>
           </aside>
         </div>
       </section>
@@ -753,38 +1267,38 @@ export default function AdminPage() {
       <section className="admin-quality-section" id="article-quality" aria-labelledby="article-quality-heading">
         <div className="admin-section-heading admin-quality-heading">
           <div>
-            <p className="eyebrow">Article filter validation</p>
-            <h2 id="article-quality-heading">Review real examples—even when there are no alerts.</h2>
-            <p>A balanced daily sample measures strong flood matches separately from stories the safety filters blocked.</p>
+            <p className="eyebrow">{t("filterValidation")}</p>
+            <h2 id="article-quality-heading">{t("qualityHeading")}</h2>
+            <p>{t("qualityDescription")}</p>
           </div>
           <a className="export-link" download="crisispulse-article-quality-reviews.csv" href={qualityExportURL}>
-            Download reviews (.csv) <span aria-hidden="true">↓</span>
+            {t("downloadReviews")} <span aria-hidden="true">↓</span>
           </a>
         </div>
 
         <div className="admin-quality-overview">
           <article className="admin-review-progress">
             <div>
-              <p className="eyebrow">Measurement progress</p>
-              <h3>{qualitySampleReady ? "First filter measurements are ready." : "Rates stay locked until the sample is credible."}</h3>
+              <p className="eyebrow">{t("measurementProgress")}</p>
+              <h3>{qualitySampleReady ? t("measurementsReady") : t("ratesLocked")}</h3>
             </div>
             <div className="admin-review-meter">
-              <div><strong>{resolvedReviews}</strong><span>resolved article labels</span></div>
-              <span className="admin-meter" role="progressbar" aria-label="Resolved article-review progress" aria-valuemin={0} aria-valuemax={minimumReviews} aria-valuenow={resolvedReviews}><i style={{ width: `${qualityProgress}%` }} /></span>
-              <small>{qualitySampleReady ? "Balanced strong and blocked minimum reached." : qualityBalancePending ? "Total minimum reached; strong and blocked labels still need balance." : `${remainingReviews} more relevant or not-relevant decisions needed, balanced across strong and blocked matches.`}</small>
+              <div><strong>{formatNumber(resolvedReviews, localeTag)}</strong><span>{t("resolvedLabels")}</span></div>
+              <span className="admin-meter" role="progressbar" aria-label={t("resolvedProgress")} aria-valuemin={0} aria-valuemax={minimumReviews} aria-valuenow={resolvedReviews}><i style={{ width: `${qualityProgress}%` }} /></span>
+              <small>{qualitySampleReady ? t("balancedMinimum") : qualityBalancePending ? t("totalMinimumBalance") : t("decisionsRemaining", { count: formatNumber(remainingReviews, localeTag) })}</small>
             </div>
           </article>
           <aside className="admin-quality-results">
-            <div><span>Strong-match relevance</span><strong>{formatPercent(qualitySummary?.high_match_precision)}</strong><small>{qualitySummary?.high_resolved ?? 0} strong matches resolved</small></div>
-            <div><span>Relevant among blocked</span><strong>{formatPercent(qualitySummary?.weak_match_relevant_rate)}</strong><small>{qualitySummary?.weak_resolved ?? 0} blocked matches resolved</small></div>
-            <p>Because this sample is deliberately balanced, these are separate filter checks—not an overall accuracy claim.</p>
+            <div><span>{t("strongMatchRelevance")}</span><strong>{formatPercent(qualitySummary?.high_match_precision, localeTag)}</strong><small>{t("strongResolved", { count: formatNumber(qualitySummary?.high_resolved ?? 0, localeTag) })}</small></div>
+            <div><span>{t("blockedRelevance")}</span><strong>{formatPercent(qualitySummary?.weak_match_relevant_rate, localeTag)}</strong><small>{t("blockedResolved", { count: formatNumber(qualitySummary?.weak_resolved ?? 0, localeTag) })}</small></div>
+            <p>{t("qualityCaveat")}</p>
           </aside>
         </div>
 
-        <ol className="admin-quality-guide" aria-label="How to review an article">
-          <li><span>01</span><div><strong>Open the publisher story</strong><small>Use the headline link and read enough to identify the actual subject.</small></div></li>
-          <li><span>02</span><div><strong>Judge physical flooding</strong><small>Choose Relevant flood only when the article describes a real flood, flooding, or flood response.</small></div></li>
-          <li><span>03</span><div><strong>Keep uncertainty honest</strong><small>Choose Not relevant for metaphorical or unrelated stories; use Uncertain when the evidence is insufficient.</small></div></li>
+        <ol className="admin-quality-guide" aria-label={t("reviewGuide")}>
+          <li><span>01</span><div><strong>{t("openPublisher")}</strong><small>{t("openPublisherHelp")}</small></div></li>
+          <li><span>02</span><div><strong>{t("judgeFlooding")}</strong><small>{t("judgeFloodingHelp")}</small></div></li>
+          <li><span>03</span><div><strong>{t("honestUncertainty")}</strong><small>{t("honestUncertaintyHelp")}</small></div></li>
         </ol>
 
         {qualityNotice ? (
@@ -795,21 +1309,21 @@ export default function AdminPage() {
             role={qualityNotice.kind === "error" ? "alert" : "status"}
             tabIndex={-1}
           >
-            <strong>{qualityNotice.kind === "success" ? "Answer saved" : "Not saved"}</strong>
+            <strong>{qualityNotice.kind === "success" ? t("answerSaved") : t("notSaved")}</strong>
             <span>{qualityNotice.message}</span>
           </p>
         ) : null}
 
         {qualitySample?.articles?.length ? (
           <div className="quality-queue-toolbar">
-            <p><strong>{pendingQualityArticles.length}</strong><span>{pendingQualityArticles.length === 1 ? "article needs review" : "articles need review"}</span></p>
+            <p><strong>{formatNumber(pendingQualityArticles.length, localeTag)}</strong><span>{pendingQualityArticles.length === 1 ? t("oneNeedsReview") : t("manyNeedReview")}</span></p>
             {reviewedQualityArticles.length ? (
               <button
                 aria-expanded={showReviewedArticles}
                 onClick={() => setShowReviewedArticles((current) => !current)}
                 type="button"
               >
-                {showReviewedArticles ? "Hide reviewed" : `Show reviewed (${reviewedQualityArticles.length})`}
+                {showReviewedArticles ? t("hideReviewed") : t("showReviewed", { count: formatNumber(reviewedQualityArticles.length, localeTag) })}
               </button>
             ) : null}
           </div>
@@ -822,10 +1336,15 @@ export default function AdminPage() {
               const isSaving = savingArticleReview?.articleID === article.article_id;
               const activeDecision = isSaving ? savingArticleReview?.decision : article.decision;
               const bucketLabel = article.review_bucket === "high_match"
-                ? "Strong match"
+                ? t("strongMatch")
                 : article.review_bucket === "headline_conflict"
-                  ? "Headline conflict"
-                  : "Ambiguous match";
+                  ? t("headlineConflict")
+                  : t("ambiguousMatch");
+              const reviewReason = article.review_bucket === "high_match"
+                ? t("highMatchReason")
+                : article.review_bucket === "headline_conflict"
+                  ? t("conflictReason")
+                  : t("ambiguousReason");
               return (
                 <article
                   aria-busy={isSaving}
@@ -835,32 +1354,32 @@ export default function AdminPage() {
                   <header>
                     <span className={`quality-strength ${article.match_strength}`}>{bucketLabel}</span>
                     <span className={activeDecision ? `decision-chip ${activeDecision === "relevant" ? "confirmed" : activeDecision === "not_relevant" ? "irrelevant" : "uncertain"}` : "decision-chip pending"}>
-                      {isSaving ? "Saving answer" : activeDecision === "relevant" ? "Relevant" : activeDecision === "not_relevant" ? "Not relevant" : activeDecision === "uncertain" ? "Uncertain" : "Needs review"}
+                      {isSaving ? t("savingAnswer") : activeDecision === "relevant" ? t("relevant") : activeDecision === "not_relevant" ? t("notRelevant") : activeDecision === "uncertain" ? t("uncertain") : t("needsReview")}
                     </span>
                   </header>
                   {link ? <a className="article-quality-title" href={link} rel="noopener noreferrer" target="_blank">{article.title} <span aria-hidden="true">↗</span></a> : <strong className="article-quality-title">{article.title}</strong>}
                   <small className={`article-title-source ${article.title_source ?? "legacy"}`}>
                     {article.title_source === "manual_override"
-                      ? "Manually verified publisher title"
+                      ? t("manualTitle")
                       : article.title_source === "publisher_metadata"
-                      ? "Publisher-provided title"
+                      ? t("publisherTitle")
                       : article.title_source === "url_path"
-                        ? "Cleaned from publisher URL"
+                        ? t("urlTitle")
                         : article.title_source === "unavailable"
-                          ? "No trustworthy title available"
-                          : "Title source not recorded"}
+                          ? t("unavailableTitle")
+                          : t("unrecordedTitle")}
                   </small>
-                  <p>{article.review_reason}</p>
+                  <p>{reviewReason}</p>
                   <dl>
-                    <div><dt>Publisher</dt><dd>{article.source_domain || "Unknown"}</dd></div>
-                    <div><dt>Location</dt><dd>{article.location_name || "Not confidently assigned"}</dd></div>
-                    <div><dt>Seen</dt><dd>{formatEastern(article.seen_at)}</dd></div>
+                    <div><dt>{t("publisher")}</dt><dd>{article.source_domain || t("unknown")}</dd></div>
+                    <div><dt>{t("location")}</dt><dd>{article.location_name || t("unassignedLocation")}</dd></div>
+                    <div><dt>{t("seen")}</dt><dd>{formatEastern(article.seen_at, localeTag)}</dd></div>
                   </dl>
                   <div className="quality-theme-list">
-                    {article.themes.slice(0, 2).map((theme) => <span key={theme}>{theme.replaceAll("_", " ")}</span>)}
+                    {article.themes.slice(0, 2).map((theme) => <span key={theme}>{theme}</span>)}
                   </div>
-                  {isSaving ? <p className="article-review-state" role="status">Saving this answer…</p> : null}
-                  <div className="review-actions" aria-label={`Review ${article.title}`}>
+                  {isSaving ? <p className="article-review-state" role="status">{t("savingThisAnswer")}</p> : null}
+                  <div className="review-actions" aria-label={t("reviewArticle", { title: article.title })}>
                     {articleReviewOptions.map((option) => (
                       <button
                         aria-pressed={activeDecision === option.value}
@@ -870,7 +1389,7 @@ export default function AdminPage() {
                         onClick={() => void saveArticleReview(article, option.value)}
                         type="button"
                       >
-                        {isSaving && savingArticleReview?.decision === option.value ? "Saving…" : option.label}
+                        {isSaving && savingArticleReview?.decision === option.value ? t("saving") : t(option.labelKey)}
                       </button>
                     ))}
                   </div>
@@ -881,16 +1400,22 @@ export default function AdminPage() {
         ) : qualitySample?.articles?.length ? (
           <div className="admin-surface quality-all-reviewed">
             <span aria-hidden="true">✓</span>
-            <div><strong>Today’s review queue has no pending cards.</strong><p>Every sampled article has an answer. Overall measurements unlock only after a balanced sample; use Show reviewed if you need to correct one.</p></div>
+            <div><strong>{t("queueClear")}</strong><p>{t("queueClearHelp")}</p></div>
           </div>
         ) : (
-          <div className="admin-surface admin-empty">The first archive-backed daily sample will appear after the next refresh.</div>
+          <div className="admin-surface admin-empty">{t("samplePending")}</div>
         )}
 
         <aside className="admin-quality-safety">
-          <strong>Safe by design.</strong>
-          <span>Review decisions are append-only. This page cannot delete data, restart services, change billing, or issue an emergency warning.</span>
-          <small>{qualitySample ? `${formatNumber(qualitySample.articles.length)} articles sampled from ${formatNumber(qualitySample.archive_articles)} permanently archived records on ${qualitySample.sample_date}.` : "Waiting for a live sample."}</small>
+          <strong>{t("safeByDesign")}</strong>
+          <span>{t("safetyDescription")}</span>
+          <small>{qualitySample ? t("sampleDetails", {
+            sampled: formatNumber(qualitySample.articles.length, localeTag),
+            articleUnit: t(qualitySample.articles.length === 1 ? "article" : "articles"),
+            archived: formatNumber(qualitySample.archive_articles, localeTag),
+            recordUnit: t(qualitySample.archive_articles === 1 ? "record" : "records"),
+            date: formatSampleDate(qualitySample.sample_date, localeTag),
+          }) : t("waitingLiveSample")}</small>
         </aside>
       </section>
     </main>

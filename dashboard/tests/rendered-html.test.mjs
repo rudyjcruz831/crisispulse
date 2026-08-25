@@ -4,14 +4,14 @@ import test from "node:test";
 
 const projectRoot = new URL("../", import.meta.url);
 
-async function render(pathname = "/") {
+async function render(pathname = "/", requestHeaders = {}) {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
   workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
   const { default: worker } = await import(workerUrl.href);
 
   return worker.fetch(
     new Request(`http://localhost${pathname}`, {
-      headers: { accept: "text/html" },
+      headers: { accept: "text/html", ...requestHeaders },
     }),
     {
       ASSETS: {
@@ -34,6 +34,9 @@ test("server-renders the CrisisPulse evidence dashboard", async () => {
   const dashboardData = JSON.parse(
     await readFile(new URL("../data/dashboard.json", import.meta.url), "utf8"),
   );
+  assert.match(html, /<html[^>]*lang="en"/i);
+  assert.match(html, />Language</i);
+  assert.match(html, /<option[^>]*value="en"[^>]*selected/i);
   assert.match(html, /<title>CrisisPulse — Flood reporting signals<\/title>/i);
   assert.match(html, /unusual reporting signals? need(?:s)? review|No unusual reporting signals right now/i);
   assert.match(html, new RegExp(dashboardData.snapshot.clean_articles.toLocaleString("en-US")));
@@ -77,12 +80,41 @@ test("server-renders the admin operations and quality page", async () => {
   assert.match(html, /U\.S\. Eastern Time/);
 });
 
+test("server-renders the saved Spanish language without an English first paint", async () => {
+  const headers = { cookie: "crisispulse-language=es" };
+  const [dashboardResponse, adminResponse] = await Promise.all([
+    render("/", headers),
+    render("/admin", headers),
+  ]);
+  assert.equal(dashboardResponse.status, 200);
+  assert.equal(adminResponse.status, 200);
+
+  const [dashboardHTML, adminHTML] = await Promise.all([
+    dashboardResponse.text(),
+    adminResponse.text(),
+  ]);
+  for (const html of [dashboardHTML, adminHTML]) {
+    assert.match(html, /<html[^>]*lang="es"/i);
+    assert.match(html, />Idioma</i);
+    assert.match(html, /<option[^>]*value="es"[^>]*selected/i);
+  }
+
+  assert.match(dashboardHTML, /<title>CrisisPulse — Señales de reportes de inundaciones<\/title>/i);
+  assert.match(dashboardHTML, /Monitor global de reportes de inundaciones/i);
+  assert.doesNotMatch(dashboardHTML, /Global flood reporting monitor/i);
+  assert.match(adminHTML, /<title>Administración de CrisisPulse — Consola de operaciones<\/title>/i);
+  assert.doesNotMatch(adminHTML, /Know what is working before customers do/i);
+});
+
 test("removes the disposable starter preview", async () => {
-  const [page, adminPage, globalStyles, layout, packageJson] = await Promise.all([
+  const [page, adminPage, globalStyles, layout, i18n, i18nServer, i18nShared, packageJson] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/admin/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/i18n.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/i18n-server.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/i18n-shared.ts", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
   ]);
 
@@ -115,6 +147,8 @@ test("removes the disposable starter preview", async () => {
   assert.match(page, /const reviewsURL = "\/api\/v1\/reviews"/);
   assert.match(page, /href="\/admin"/);
   assert.match(adminPage, /\/api\/v1\/admin\/status/);
+  assert.match(adminPage, /storyUnit:\s*t\(prediction\.stories_at_detection === 1 \? "story" : "stories"\)/);
+  assert.match(adminPage, /domainUnit:\s*t\(prediction\.domains_at_detection === 1 \? "domain" : "domains"\)/);
   assert.match(adminPage, /adminStatusAvailability/);
   assert.match(adminPage, /setAdminStatus\(null\)/);
   assert.match(adminPage, /Never retain a previous Go result/);
@@ -150,6 +184,8 @@ test("removes the disposable starter preview", async () => {
   assert.match(adminPage, /Cleaned from publisher URL/);
   assert.match(adminPage, /No trustworthy title available/);
   assert.match(adminPage, /balanced daily sample/i);
+  assert.match(adminPage, /articleUnit:\s*t\(qualitySample\.articles\.length === 1 \? "article" : "articles"\)/);
+  assert.match(adminPage, /recordUnit:\s*t\(qualitySample\.archive_articles === 1 \? "record" : "records"\)/);
   assert.match(adminPage, /America\/New_York/);
   assert.match(adminPage, /Raw archive usage/);
   assert.match(adminPage, /raw_storage_limit_bytes/);
@@ -180,5 +216,11 @@ test("removes the disposable starter preview", async () => {
   assert.match(globalStyles, /\.readiness-decision\.restarted/);
   assert.doesNotMatch(page, /127\.0\.0\.1:8080/);
   assert.match(layout, /CrisisPulse — Flood reporting signals/);
+  assert.match(layout, /getRequestLocale/);
+  assert.match(i18n, /LanguageSwitcher/);
+  assert.match(i18nShared, /crisispulse-language/);
+  assert.match(i18n, /localStorage\.setItem/);
+  assert.match(i18n, /document\.documentElement\.lang/);
+  assert.match(i18nServer, /cookies\(\)/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
 });

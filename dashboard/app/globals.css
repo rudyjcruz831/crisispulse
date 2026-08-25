@@ -74,6 +74,42 @@ main { min-height: 100vh; }
 .header-nav a:hover, .header-nav a:focus-visible { background: #e7e7df; color: var(--ink); outline: none; }
 .header-nav a.active { background: var(--ink); color: white; }
 
+.language-switcher {
+  align-items: center;
+  display: flex;
+  gap: 7px;
+}
+
+.language-switcher label {
+  color: var(--muted);
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.language-switcher select {
+  appearance: none;
+  background: var(--surface)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%2310282f' d='m1 1 4 4 4-4'/%3E%3C/svg%3E")
+    no-repeat right 9px center;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.7rem;
+  font-weight: 750;
+  min-height: 36px;
+  padding: 7px 27px 7px 10px;
+}
+
+.language-switcher select:focus-visible {
+  border-color: var(--teal);
+  outline: 2px solid color-mix(in srgb, var(--teal) 35%, transparent);
+  outline-offset: 2px;
+}
+
 .admin-page { background: #ecefe9; }
 .admin-hero { align-items: end; background: var(--navy); color: white; display: grid; gap: 40px; grid-template-columns: minmax(0, 1.35fr) minmax(260px, 0.65fr); padding: clamp(52px, 7vw, 88px) 6vw; }
 .admin-hero h1 { font-size: clamp(3.2rem, 6vw, 6rem); margin-bottom: 22px; }
@@ -567,6 +603,8 @@ footer strong { color: var(--ink); }
   .header-nav { order: 3; width: 100%; }
   .header-nav a { align-items: center; display: flex; flex: 1; justify-content: center; min-height: 44px; text-align: center; }
   .header-meta { align-items: flex-start; flex-wrap: wrap; }
+  .language-switcher { justify-content: space-between; order: 2; width: 100%; }
+  .language-switcher select { min-height: 44px; }
   .mobile-section-nav { background: rgba(244, 241, 233, 0.97); border-bottom: 1px solid var(--line); display: flex; overflow-x: auto; position: sticky; scrollbar-width: none; top: 0; z-index: 20; }
   .mobile-section-nav::-webkit-scrollbar { display: none; }
   .mobile-section-nav a { align-items: center; display: flex; flex: 0 0 auto; font-size: 0.72rem; font-weight: 800; min-height: 46px; padding: 0 16px; text-decoration: none; text-transform: uppercase; }
@@ -585,6 +623,8 @@ footer strong { color: var(--ink); }
   .coverage-card { min-height: 248px; }
   .coverage-card header { align-items: flex-start; }
   .review-section { padding-left: 4vw; padding-right: 4vw; }
+  .review-grid { grid-template-columns: minmax(0, 1fr); }
+  .review-card { min-width: 0; }
   .review-heading { align-items: stretch; flex-direction: column; }
   .review-progress { align-self: flex-start; }
   .review-evidence { grid-template-columns: repeat(2, 1fr); row-gap: 18px; }
@@ -615,7 +655,7 @@ footer strong { color: var(--ink); }
   .pending-model-score > span, .pending-model-score strong, .pending-model-score small, .pending-model-score em { grid-column: 1; grid-row: auto; text-align: left; }
   .content-grid > *, .table-wrap, .admin-forecast-grid > *, .admin-table-wrap { max-width: 100%; min-width: 0; width: 100%; }
   .table-wrap, .admin-table-wrap { overflow: visible; }
-  .signal-table, .admin-forecast-mobile-table { min-width: 0; }
+  .signal-table, .admin-forecast-table .admin-forecast-mobile-table { min-width: 0; }
   .signal-table thead, .admin-forecast-mobile-table thead { clip: rect(0 0 0 0); clip-path: inset(50%); height: 1px; overflow: hidden; position: absolute; white-space: nowrap; width: 1px; }
   .signal-table tbody, .admin-forecast-mobile-table tbody { display: grid; gap: 12px; }
   .signal-table tr, .admin-forecast-mobile-table tr { background: #fff; border: 1px solid var(--line); display: block; padding: 13px 15px; }
