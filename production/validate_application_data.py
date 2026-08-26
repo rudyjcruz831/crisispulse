@@ -7,6 +7,7 @@ import ipaddress
 import json
 import re
 import sys
+import unicodedata
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -43,7 +44,17 @@ WINDOW_START_PATTERN = re.compile(
     r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})?$"
 )
 SIGNAL_DECISIONS = {"confirmed_event", "irrelevant_news", "uncertain"}
-ARTICLE_DECISIONS = {"relevant", "not_relevant", "uncertain"}
+LEGACY_ARTICLE_DECISIONS = {"relevant", "not_relevant", "uncertain"}
+ARTICLE_DECISIONS_V2 = {
+    "reported_flooding",
+    "flood_risk_warning",
+    "heavy_rain_only",
+    "not_flood_related",
+    "uncertain",
+}
+ARTICLE_DECISION_SCHEMA_VERSION = 2
+ARTICLE_TAG_MAX_COUNT = 8
+ARTICLE_TAG_MAX_LENGTH = 32
 MATCH_STRENGTHS = {"high", "weak"}
 REVIEW_BUCKETS = {"high_match", "headline_conflict", "ambiguous_match"}
 
@@ -222,6 +233,13 @@ def _validate_article_review(payload: dict[str, Any], *, label: str) -> None:
     review_bucket = _string_field(payload, "review_bucket", label=label)
     decision = _string_field(payload, "decision", label=label)
     reviewed_at = _string_field(payload, "reviewed_at", label=label)
+    decision_schema_version = payload.get("decision_schema_version", 1)
+    tags = payload.get("tags", [])
+    # The Go API serializes an empty optional slice as JSON null. Treat that
+    # representation as an empty tag list while continuing to reject every
+    # other non-list value.
+    if tags is None:
+        tags = []
     if not ARTICLE_ID_PATTERN.fullmatch(article_id):
         raise ValidationError(f"{label} has an invalid article_id")
     if not 1 <= _byte_length(title) <= 1024 or _byte_length(source_domain) > 255:
@@ -232,8 +250,45 @@ def _validate_article_review(payload: dict[str, Any], *, label: str) -> None:
         raise ValidationError(f"{label} has an invalid match_strength")
     if review_bucket not in REVIEW_BUCKETS:
         raise ValidationError(f"{label} has an invalid review_bucket")
-    if decision not in ARTICLE_DECISIONS:
+    if (
+        isinstance(decision_schema_version, bool)
+        or not isinstance(decision_schema_version, int)
+        or decision_schema_version not in {1, ARTICLE_DECISION_SCHEMA_VERSION}
+    ):
+        raise ValidationError(f"{label} has an invalid decision_schema_version")
+    allowed_decisions = (
+        LEGACY_ARTICLE_DECISIONS
+        if decision_schema_version == 1
+        else ARTICLE_DECISIONS_V2
+    )
+    if decision not in allowed_decisions:
         raise ValidationError(f"{label} has an invalid decision")
+    if not isinstance(tags, list) or len(tags) > ARTICLE_TAG_MAX_COUNT:
+        raise ValidationError(f"{label} has invalid article tags")
+    if decision_schema_version == 1 and tags:
+        raise ValidationError(f"{label} version 1 cannot contain article tags")
+    seen_tags: set[str] = set()
+    for tag in tags:
+        if (
+            not isinstance(tag, str)
+            or not tag
+            or len(tag) > ARTICLE_TAG_MAX_LENGTH
+            or tag != tag.lower()
+            or tag.startswith("-")
+            or tag.endswith("-")
+            or "--" in tag
+            or any(
+                character != "-"
+                and not (
+                    unicodedata.category(character).startswith("L")
+                    or unicodedata.category(character) == "Nd"
+                )
+                for character in tag
+            )
+            or tag in seen_tags
+        ):
+            raise ValidationError(f"{label} has invalid article tags")
+        seen_tags.add(tag)
     _parse_record_timestamp(reviewed_at, label=label)
 
 

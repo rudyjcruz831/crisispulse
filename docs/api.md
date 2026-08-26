@@ -34,6 +34,10 @@ The default address is `http://127.0.0.1:8080`, and the default allowed dashboar
 | `POST` | `/api/v1/quality/articles` | Append a validated relevance decision for an article in the current sample. |
 | `GET` | `/api/v1/quality/articles/summary` | Return guarded article-filter quality measurements and review progress. |
 | `GET` | `/api/v1/quality/articles/export.csv` | Download the latest article relevance decision per article as CSV. |
+| `GET` | `/api/v1/training/articles` | Return the latest article label per article with deterministic training eligibility and class counts. |
+| `GET` | `/api/v1/training/articles/export.csv` | Download the latest eligible and excluded article labels as an Excel-compatible audit CSV. |
+| `GET` | `/api/v1/training/status` | Return a bounded, sanitized summary of the latest local article-baseline report. |
+| `GET` | `/api/v1/training/external-datasets` | Return the fail-closed external dataset audit registry. |
 
 ### Health response
 
@@ -70,9 +74,139 @@ The summary counts only the latest decision for each stable signal ID. `confirme
 
 ### Article-filter quality
 
-The daily sample contains 24 safe publisher links drawn deterministically from recent permanent history: eight strong matches, eight weak headline conflicts, and eight other ambiguous matches when each group has enough rows. `POST` accepts only `relevant`, `not_relevant`, or `uncertain` for an article in the current sample. The API copies the system classification from the server-side sample rather than trusting browser-supplied metadata.
+The daily sample contains 24 safe publisher links drawn deterministically from recent permanent history: eight strong matches, eight weak headline conflicts, and eight other ambiguous matches when each group has enough rows. Version 2 article-review `POST` requests accept exactly `reported_flooding`, `flood_risk_warning`, `heavy_rain_only`, `not_flood_related`, or `uncertain` for an article in the current sample. They may also carry up to eight optional custom context tags. The server normalizes each tag to a distinct lowercase Unicode letter/digit slug of at most 32 characters, writes `decision_schema_version: 2`, and copies the system classification from the server-side sample rather than trusting browser-supplied metadata.
 
-Strong-match relevance and weak-match relevance remain `null` until at least 20 decisions are resolved and both the strong and blocked strata contain at least five resolved reviews. The sample is deliberately balanced, so its combined relevant/not-relevant ratio is not an estimate of production prevalence or overall accuracy.
+The labels follow a fixed precedence: reported physical flooding first; otherwise an explicit flood forecast, watch, warning, or risk; otherwise heavy rain or severe weather without explicit flood evidence; otherwise not flood-related. `uncertain` is reserved for unavailable, contradictory, or insufficient evidence. The first four labels are resolved training classes. `uncertain` is retained but excluded from rate denominators.
+
+Historical records with no schema-version field are version 1 and may contain `relevant`, `not_relevant`, or `uncertain`. They remain in the append-only audit log and are not silently converted into detailed classes. The CSV contains the latest decision per article, so an unsuperseded version 1 answer remains visible there while a corrected article exports its current version 2 answer. The current sample presents version 1 answers for re-review. A new version 2 answer appends a correction and becomes the latest decision without deleting the older audit record.
+
+Strong-match and blocked-match flood-related rates count `reported_flooding` plus `flood_risk_warning` in the numerator. They remain `null` until at least 20 version 2 decisions are resolved and both the strong and blocked strata contain at least five resolved reviews. The sample is deliberately balanced, so its combined class share is not an estimate of production prevalence or overall accuracy. Custom tags are secondary context rather than measurement classes and do not change alerts or rate calculations. The quality CSV is a versioned latest-label audit export and includes pipe-separated tags; the separate Training Data Lab view below adds explicit training eligibility. Neither export is consumed by an automatic model-training job.
+
+### Training Data Lab
+
+`GET /api/v1/training/articles` is a read-only, schema-versioned view of the article-review audit log. It returns one row per `article_id`, using only that article's latest appended decision. Correcting a label does not rewrite or delete the earlier JSONL record; the correction is appended to `article-reviews.jsonl` and becomes the row exposed by this endpoint.
+
+```json
+{
+  "schema_version": 1,
+  "summary": {
+    "total_articles": 3,
+    "training_eligible": 1,
+    "excluded": 2,
+    "class_counts": {
+      "reported_flooding": 1,
+      "flood_risk_warning": 0,
+      "heavy_rain_only": 0,
+      "not_flood_related": 0
+    },
+    "exclusion_reason_counts": {
+      "legacy_schema": 1,
+      "uncertain": 1
+    }
+  },
+  "articles": [
+    {
+      "article_id": "0000000000000000000000000000000000000000000000000000000000000000",
+      "title": "Flood closes local road",
+      "url": "https://news.example/flood-closes-road",
+      "source_domain": "news.example",
+      "match_strength": "high",
+      "review_bucket": "high_match",
+      "decision": "reported_flooding",
+      "decision_schema_version": 2,
+      "tags": ["road-closure"],
+      "reviewed_at": "2026-08-24T12:00:00Z",
+      "training_eligible": true,
+      "exclusion_reason": ""
+    }
+  ]
+}
+```
+
+Eligibility is deterministic and does not imply that the sample is large enough to train a useful model:
+
+- Version 2 `reported_flooding`, `flood_risk_warning`, `heavy_rain_only`, and `not_flood_related` decisions are eligible. `class_counts` counts only these eligible latest labels and always includes all four class keys, including zero counts.
+- A version 2 `uncertain` decision is excluded with `exclusion_reason: "uncertain"`.
+- A version 1 decision is excluded with `exclusion_reason: "legacy_schema"`, including historical records that originally omitted the schema-version field.
+- Every article row includes `training_eligible` and `exclusion_reason`. Eligible rows use an empty exclusion reason. `summary.total_articles` includes eligible and excluded rows.
+
+`GET /api/v1/training/articles/export.csv` exports the same latest-label audit population, including excluded rows. Its columns are `article_id`, `title`, `url`, `source_domain`, `match_strength`, `review_bucket`, `decision`, `decision_schema_version`, `reviewed_at`, `tags`, `training_eligible`, and `exclusion_reason`. Tags are pipe-separated. The file uses a UTF-8 byte-order mark and CRLF rows for Excel compatibility. Cells derived from publisher or reviewer data are protected against spreadsheet formula execution: dangerous leading `=`, `+`, `-`, `@`, tab, or carriage-return characters are prefixed with an apostrophe. Both training endpoints use `Cache-Control: no-store`; the CSV export does not modify review history.
+
+### Training status
+
+`GET /api/v1/training/status` reads the fixed `article-baseline-report.json` file beside the configured review log and returns only fields needed by the Training Data Lab. The response includes the report status and creation time, whether fitting actually happened, an evaluation tier when applicable, review/resolved/usable counts, exclusions, four-class counts before and after inference-text filtering, sanitized chronological split metadata and class counts, and the production and non-evaluative smoke-test gates. Private input paths, prediction paths, runtime details, fingerprints, model metrics, and arbitrary report fields are not returned.
+
+The report is capped at 512 KiB and must use report schema 1 and the native CrisisPulse article-review contract. Counts, class keys, exclusion reasons, split boundaries and leakage flags, fixed gate names/minimums, gate outcomes, readiness states, and training status must agree with one another. A missing report returns `404` with `training status report not found`. Empty, oversized, malformed, unsupported, or internally inconsistent reports fail closed with `503` and the fixed public message `training status report unavailable`; details remain only in private API logs. The endpoint accepts only `GET` and `HEAD` and uses `Cache-Control: no-store`.
+
+A readiness-only report with too little data returns a summary shaped like:
+
+```json
+{
+  "report_schema_version": 1,
+  "status": "not_ready",
+  "training_performed": false,
+  "created_at": "2026-08-25T12:00:00+00:00",
+  "latest_review_count": 46,
+  "resolved_schema_v2_count": 20,
+  "usable_training_rows": 19,
+  "exclusion_counts": {"missing_inference_text": 1, "legacy_schema": 26},
+  "class_counts_before_text_filter": {
+    "reported_flooding": 5,
+    "flood_risk_warning": 5,
+    "heavy_rain_only": 2,
+    "not_flood_related": 8
+  },
+  "class_counts_after_text_filter": {
+    "reported_flooding": 5,
+    "flood_risk_warning": 5,
+    "heavy_rain_only": 2,
+    "not_flood_related": 7
+  },
+  "split": {
+    "computable": false,
+    "reason": "insufficient_data_for_leakage_safe_split",
+    "story_rows_promoted_to_newer_split": 0,
+    "earlier_rows_purged_for_final_publishers": 0,
+    "story_overlap_after_purge": false,
+    "final_publisher_overlap_after_purge": false,
+    "training_rows": 0,
+    "validation_rows": 0,
+    "test_rows": 0,
+    "class_counts": {}
+  },
+  "production_readiness": {
+    "ready": false,
+    "gates": [
+      {"name": "total_usable_rows", "actual": 19, "minimum": 500, "passed": false},
+      {"name": "minimum_rows_in_each_class", "actual": 2, "minimum": 100, "passed": false},
+      {"name": "distinct_article_dates", "actual": 4, "minimum": 30, "passed": false},
+      {"name": "publisher_groups", "actual": 12, "minimum": 100, "passed": false},
+      {"name": "inference_text_coverage", "actual": 0.95, "minimum": 0.95, "passed": true},
+      {"name": "leakage_safe_split_computable", "actual": false, "minimum": true, "passed": false}
+    ]
+  },
+  "smoke_test_readiness": {
+    "ready": false,
+    "gates": [
+      {"name": "total_usable_rows", "actual": 19, "minimum": 16, "passed": true},
+      {"name": "minimum_rows_in_each_class", "actual": 2, "minimum": 4, "passed": false},
+      {"name": "distinct_article_dates", "actual": 4, "minimum": 3, "passed": true},
+      {"name": "publisher_groups", "actual": 12, "minimum": 12, "passed": true},
+      {"name": "inference_text_coverage", "actual": 0.95, "minimum": 1.0, "passed": false},
+      {"name": "leakage_safe_split_computable", "actual": false, "minimum": true, "passed": false}
+    ]
+  },
+  "blocked_reason": "readiness_gates_not_met"
+}
+```
+
+### External dataset audit
+
+`GET /api/v1/training/external-datasets` returns the versioned, read-only audit registry for candidate third-party training datasets. Each entry records its source URL or DOI, current access and license state, whether article text is actually available, the source label type, an explicit mapping to CrisisPulse labels, import and training decisions, supporting evidence, notes, and the date those facts were last checked.
+
+The registry is fail-closed. A public download does not count as training permission, `license_training_approved` remains false when `license_state` is `unknown`, and every unknown license must use the `blocked` training decision. Training approval additionally requires a verified permissive license, available article text, and labels with more than low compatibility. External labels retain provenance and cannot silently become native CrisisPulse ground truth; a separate native holdout remains required.
+
+The version-controlled source is `cmd/api/data/external-dataset-audit.v1.json`. Unknown JSON fields, unrecognized audit states, duplicate dataset IDs, malformed evidence links, and unsafe license/training combinations make the registry unavailable rather than weakening these rules. The endpoint accepts only `GET` and `HEAD` and uses `Cache-Control: no-store`.
 
 ### Signals response
 

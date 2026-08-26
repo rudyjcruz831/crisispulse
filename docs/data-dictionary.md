@@ -43,7 +43,20 @@ Current quality flags are `invalid_url`, `invalid_seen_at`, `missing_location`, 
 
 `quality-review-sample.json` is regenerated after permanent archival and remains stable for one UTC day. It contains 24 recent articles when the archive has enough data, balanced across `high_match`, `headline_conflict`, and `ambiguous_match`. Each item carries only bounded review evidence: stable article ID, timestamp, title, title source (`manual_override`, `publisher_metadata`, `url_path`, or `unavailable`), safe publisher URL/domain, location, match strength, review reason, matched themes, and quality flags. Publisher metadata is preferred; the URL-path parser removes common dates, IDs, UUIDs, file extensions, and generic route segments. `manual_override` means the exact publisher page was human-verified and recorded in the checked-in audit file because normal automated reading was prohibited. When no trustworthy source yields a headline, the sample explicitly reports that the title is unavailable rather than displaying a domain or opaque identifier as a headline.
 
-Human decisions are stored separately in append-only `article-reviews.jsonl` as `relevant`, `not_relevant`, or `uncertain`. The API collapses corrections to the latest decision per `article_id` while retaining earlier audit entries on disk.
+Human decisions are stored separately in append-only `article-reviews.jsonl`. Version 2 records include `decision_schema_version: 2`, one of `reported_flooding`, `flood_risk_warning`, `heavy_rain_only`, `not_flood_related`, or `uncertain`, and an optional `tags` array. Tags are distinct lowercase Unicode letter/digit slugs, limited to eight values and 32 characters each. They capture secondary context such as `fatality`, `heavy-rain`, `flood-damage`, or `cleanup`; they never replace the primary decision. The API collapses corrections to the latest decision per `article_id` while retaining earlier audit entries on disk. Historical records without a schema-version field use the coarser version 1 values `relevant`, `not_relevant`, or `uncertain`; they remain valid audit evidence but require a new detailed answer before entering version 2 measurements or training data.
+
+The detailed decision order is: reported physical flooding; otherwise explicit flood risk/watch/warning; otherwise heavy rain or severe weather without flood evidence; otherwise unrelated content. Use `uncertain` only when the source cannot support a decision. The quality API export includes the schema version and pipe-separated custom tags. The Training Data Lab endpoints below additionally identify which latest labels are eligible and can be joined to the permanent archive by `article_id`.
+
+## Training Data Lab derived fields
+
+The Training Data Lab API and its audit CSV derive these fields from the latest valid review record for each `article_id`. They are not stored as new fields in the append-only review log.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `training_eligible` | boolean | `true` only when the latest decision uses schema version 2 and is one of `reported_flooding`, `flood_risk_warning`, `heavy_rain_only`, or `not_flood_related`. It does not assert that the overall dataset is large or balanced enough for model training. |
+| `exclusion_reason` | string | Empty for eligible rows, `uncertain` for a version 2 uncertain label, or `legacy_schema` for a version 1 label. Historical records with no stored schema version are read as version 1. |
+
+Corrections remain append-only on disk, but the Training Data Lab exposes only the newest decision per article. Consequently, an earlier eligible label can become excluded after an uncertain correction, and a corrected version 2 label can replace a legacy label in the derived view without deleting either audit entry.
 
 ## Regional/hourly feature Parquet
 
@@ -76,11 +89,11 @@ The manual-review CSV copies the article identity, URL, disaster match, location
 | Column | Meaning |
 |---|---|
 | `review_bucket` | Sampling stratum combining high/weak theme strength with assigned/questionable location. |
-| `label_disaster_relevance` | Blank human label; suggested values are `relevant`, `not_relevant`, or `uncertain`. |
+| `label_disaster_relevance` | Blank human label; suggested values are `reported_flooding`, `flood_risk_warning`, `heavy_rain_only`, `not_flood_related`, or `uncertain`. Legacy `relevant` and `not_relevant` remain readable. |
 | `label_primary_region` | Blank human label; enter `country:adm1`, `UNKNOWN`, or `uncertain`. |
 | `review_notes` | Blank free-text notes for the reviewer. |
 
-The review evaluator accepts `relevant`, `not_relevant`, or `uncertain` for disaster relevance. Primary-region labels use `country:adm1`, `UNKNOWN`, or `uncertain`. Blank and uncertain values are reported separately and excluded from calculated rates.
+The review evaluator accepts the five detailed disaster-relevance labels and the legacy `relevant` or `not_relevant` values. It reports class counts, treats reported flooding and explicit flood risk as flood-related for the compatibility rate, and excludes blank and uncertain rows from calculated rates. Primary-region labels use `country:adm1`, `UNKNOWN`, or `uncertain`.
 
 ## Anomaly candidate Parquet
 

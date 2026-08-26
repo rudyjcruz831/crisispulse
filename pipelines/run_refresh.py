@@ -24,6 +24,7 @@ from pipelines.build_review_set import build_review_set
 from pipelines.clean_gkg import clean_files
 from pipelines.download_history import (
     GKG_SUFFIX,
+    MAX_INTERVALS,
     download_window,
     gkg_window_urls,
     latest_available_gkg_url,
@@ -508,6 +509,79 @@ def _raw_storage_bytes(raw_dir: Path) -> int:
     return sum(path.stat().st_size for path in raw_dir.glob(f"*{GKG_SUFFIX}"))
 
 
+def _refresh_download_plan(
+    raw_dir: Path,
+    latest_url: str,
+    window_intervals: int,
+) -> tuple[list[str], list[str], dict[str, object]]:
+    """Plan the normal window plus missing retained-history intervals.
+
+    The normal processing window is always retained.  When local raw history
+    exists, audit at most the latest seven days and add only absent intervals
+    older than that normal window.  This repairs both a direct resume gap and
+    older holes left by a refresh that ran before catch-up support existed.
+    """
+    normal_urls = gkg_window_urls(latest_url, window_intervals)
+    remote_name = Path(urlparse(latest_url).path).name
+    remote_timestamp = datetime.strptime(
+        remote_name.removesuffix(GKG_SUFFIX), "%Y%m%d%H%M%S"
+    )
+    retained_names: set[str] = set()
+    retained_timestamps: list[datetime] = []
+    for path in raw_dir.glob(f"*{GKG_SUFFIX}"):
+        try:
+            timestamp = datetime.strptime(
+                path.name.removesuffix(GKG_SUFFIX), "%Y%m%d%H%M%S"
+            )
+        except ValueError:
+            continue
+        if timestamp <= remote_timestamp:
+            retained_names.add(path.name)
+            retained_timestamps.append(timestamp)
+
+    metrics: dict[str, object] = {
+        "catch_up_audited_intervals": 0,
+        "catch_up_requested_files": 0,
+        "catch_up_audit_capped": False,
+        "automatic_catch_up": False,
+    }
+    if not retained_timestamps:
+        return normal_urls, [], metrics
+
+    bounded_urls = gkg_window_urls(latest_url, MAX_INTERVALS)
+    bounded_start_name = Path(urlparse(bounded_urls[0]).path).name
+    bounded_start = datetime.strptime(
+        bounded_start_name.removesuffix(GKG_SUFFIX), "%Y%m%d%H%M%S"
+    )
+    oldest_retained = min(retained_timestamps)
+    audit_start = max(oldest_retained, bounded_start)
+    audited_urls = [
+        url
+        for url in bounded_urls
+        if datetime.strptime(
+            Path(urlparse(url).path).name.removesuffix(GKG_SUFFIX),
+            "%Y%m%d%H%M%S",
+        )
+        >= audit_start
+    ]
+    normal_names = {Path(urlparse(url).path).name for url in normal_urls}
+    catch_up_urls = [
+        url
+        for url in audited_urls
+        if (name := Path(urlparse(url).path).name) not in retained_names
+        and name not in normal_names
+    ]
+    metrics.update(
+        {
+            "catch_up_audited_intervals": len(audited_urls),
+            "catch_up_requested_files": len(catch_up_urls),
+            "catch_up_audit_capped": oldest_retained < bounded_start,
+            "automatic_catch_up": bool(catch_up_urls),
+        }
+    )
+    return catch_up_urls + normal_urls, catch_up_urls, metrics
+
+
 def _prune_raw_files(
     raw_dir: Path,
     retention_bytes: int,
@@ -585,12 +659,26 @@ def run_refresh(
         "https://data.gdeltproject.org/gdeltv2/lastupdate.txt"
     )
     latest_url = latest_available_gkg_url(advertised_url)
-    source_urls = gkg_window_urls(latest_url, window_intervals)
+    source_urls, catch_up_urls, catch_up_metrics = _refresh_download_plan(
+        raw_dir,
+        latest_url,
+        window_intervals,
+    )
     download_stats = download_window(
         source_urls,
         raw_dir,
         workers=workers,
         progress_every=0,
+    )
+    catch_up_paths = [
+        raw_dir / Path(urlparse(url).path).name for url in catch_up_urls
+    ]
+    catch_up_remaining = sum(not path.is_file() for path in catch_up_paths)
+    catch_up_metrics.update(
+        {
+            "catch_up_recovered_files": len(catch_up_paths) - catch_up_remaining,
+            "catch_up_remaining_files": catch_up_remaining,
+        }
     )
     processing_files = _select_processing_files(raw_dir, window_intervals)
     clean_stats = clean_files(
@@ -602,6 +690,22 @@ def run_refresh(
     )
     # Archival happens before any raw ZIP can be pruned. A failed merge or
     # verification aborts the refresh and leaves every retained raw file intact.
+    catch_up_archive_stats = None
+    if catch_up_paths:
+        catch_up_clean_path = clean_dir / "flood_articles_catch_up.parquet"
+        clean_files(
+            catch_up_paths,
+            catch_up_clean_path,
+            disaster_type="flood",
+            minimum_strength="weak",
+            title_cache_path=dashboard_output.with_name(
+                "publisher-title-cache.json"
+            ),
+        )
+        catch_up_archive_stats = merge_article_archive(
+            catch_up_clean_path,
+            article_archive_path,
+        )
     article_archive_stats = merge_article_archive(clean_path, article_archive_path)
     title_backfill_stats = backfill_article_titles(
         article_archive_path,
@@ -660,8 +764,9 @@ def run_refresh(
     retained_bytes = _raw_storage_bytes(raw_dir)
     details = {
         **download_stats,
-        "first_file": Path(urlparse(source_urls[0]).path).name,
-        "last_file": Path(urlparse(source_urls[-1]).path).name,
+        **catch_up_metrics,
+        "first_file": processing_files[0].name,
+        "last_file": processing_files[-1].name,
         "processed_files": len(processing_files),
         "retained_raw_files": retained,
         "retained_raw_bytes": retained_bytes,
@@ -672,8 +777,10 @@ def run_refresh(
         ),
         "pruned_raw_files": pruned,
         "archived_articles": article_archive_stats.archive_rows,
-        "new_archived_articles": article_archive_stats.new_rows,
-        "updated_archived_articles": article_archive_stats.updated_rows,
+        "new_archived_articles": article_archive_stats.new_rows
+        + (catch_up_archive_stats.new_rows if catch_up_archive_stats else 0),
+        "updated_archived_articles": article_archive_stats.updated_rows
+        + (catch_up_archive_stats.updated_rows if catch_up_archive_stats else 0),
         "article_archive_bytes": title_backfill_stats.archive_bytes,
         "title_backfill_attempted_articles": title_backfill_stats.attempted_articles,
         "title_backfill_updated_articles": title_backfill_stats.updated_articles,

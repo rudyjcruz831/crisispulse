@@ -1,0 +1,242 @@
+{
+  "schema_version": 1,
+  "last_checked": "2026-08-25",
+  "policy": {
+    "unknown_license_action": "block_training",
+    "external_labels_are_ground_truth": false,
+    "native_holdout_required": true,
+    "notes": [
+      "A public download is not proof that commercial model training is permitted.",
+      "External labels must retain dataset provenance and must not be silently converted into native CrisisPulse reviews.",
+      "Weak or partially compatible labels must not be used in the final native CrisisPulse holdout."
+    ]
+  },
+  "datasets": [
+    {
+      "id": "groundsource",
+      "source_name": "Groundsource: A Global Dataset of Historical Flood Events",
+      "source_url": "https://zenodo.org/records/18647054",
+      "doi": "10.5281/zenodo.18647054",
+      "access_state": "public_download",
+      "license_state": "verified_permissive",
+      "license_training_approved": true,
+      "article_text_availability": "not_available",
+      "label_type": "news-derived structured flood-event records",
+      "compatibility_status": "partial",
+      "compatibility_mapping": [
+        {
+          "source_label": "reported past or ongoing flood event",
+          "crisispulse_label": "reported_flooding",
+          "use": "weak_supervision_or_event_validation"
+        }
+      ],
+      "import_decision": "approved_for_event_validation_only",
+      "training_decision": "not_recommended",
+      "evidence": [
+        {
+          "url": "https://zenodo.org/records/18647054",
+          "supports": "The public record describes one 667.1 MB Parquet file containing 2.6 million structured historical flood-event records."
+        },
+        {
+          "url": "https://api.datacite.org/dois/10.5281/zenodo.18647054",
+          "supports": "The official DOI metadata identifies the dataset license as Creative Commons Attribution 4.0 International."
+        },
+        {
+          "url": "https://eartharxiv.org/repository/object/12083/download/21690/",
+          "supports": "The primary manuscript documents only uuid, area_km2, start_date, end_date, and geometry in the released schema."
+        },
+        {
+          "url": "https://research.google/blog/introducing-groundsource-turning-news-reports-into-data-with-gemini/",
+          "supports": "The project distinguishes reported flood events from warnings, policy discussion, and general risk."
+        }
+      ],
+      "notes": [
+        "The CC BY 4.0 license permits reuse with attribution, but the file contains no article text, URL, title, publisher, or class-label column.",
+        "This is an event archive, not a four-class article-text dataset.",
+        "It may validate time-and-location matches for reported-flooding positives, but it cannot directly train the CrisisPulse article classifier."
+      ],
+      "last_checked": "2026-08-25"
+    },
+    {
+      "id": "bangladesh-flood-news",
+      "source_name": "Flood Event Extraction from News Media to Support Satellite-Based Flood Insurance",
+      "source_url": "https://arxiv.org/abs/2312.14943",
+      "doi": "",
+      "access_state": "paper_only_dataset_access_not_verified",
+      "license_state": "unknown",
+      "license_training_approved": false,
+      "article_text_availability": "not_verified",
+      "label_type": "expert binary article classification",
+      "compatibility_status": "partial",
+      "compatibility_mapping": [
+        {
+          "source_label": "flood",
+          "crisispulse_label": "reported_flooding",
+          "use": "candidate_supervised_label_after_manual_mapping_audit"
+        },
+        {
+          "source_label": "not flood",
+          "crisispulse_label": "no_direct_mapping",
+          "use": "must_not_be_collapsed_into_one_crisispulse_class"
+        }
+      ],
+      "import_decision": "blocked_pending_dataset_access_license_and_text_review",
+      "training_decision": "blocked",
+      "evidence": [
+        {
+          "url": "https://arxiv.org/abs/2312.14943",
+          "supports": "The paper reports a Bangladesh news corpus and an expert-annotated binary flood-versus-not-flood subset."
+        }
+      ],
+      "notes": [
+        "This is the closest located dataset to the CrisisPulse article-classification task.",
+        "Its not-flood class can mix flood warnings, heavy rain, policy discussion, and unrelated material.",
+        "A usable data file, article-text rights, and a training license have not yet been verified."
+      ],
+      "last_checked": "2026-08-25"
+    },
+    {
+      "id": "humaid",
+      "source_name": "HumAID",
+      "source_url": "https://crisisnlp.qcri.org/humaid_dataset.html",
+      "doi": "",
+      "access_state": "public_project_page",
+      "license_state": "verified_restricted",
+      "license_training_approved": false,
+      "article_text_availability": "social_posts_only",
+      "label_type": "humanitarian-category labels on social-media posts",
+      "compatibility_status": "low",
+      "compatibility_mapping": [
+        {
+          "source_label": "humanitarian information categories",
+          "crisispulse_label": "no_direct_mapping",
+          "use": "optional_auxiliary_crisis_language_research"
+        }
+      ],
+      "import_decision": "blocked_by_research_only_terms",
+      "training_decision": "blocked",
+      "evidence": [
+        {
+          "url": "https://arxiv.org/abs/2104.03090",
+          "supports": "The paper describes human-labeled social-media posts across disaster events and humanitarian categories."
+        },
+        {
+          "url": "https://crisisnlp.qcri.org/humaid_dataset.html",
+          "supports": "The project page is the dataset access reference supplied by the authors."
+        },
+        {
+          "url": "https://crisisnlp.qcri.org/terms-of-use.html",
+          "supports": "The official terms limit use to humanitarian-computing research and impose confidentiality and deletion requirements."
+        }
+      ],
+      "notes": [
+        "Social-media wording and humanitarian categories do not directly match news headlines or the four CrisisPulse classes.",
+        "The current terms are not suitable for commercial CrisisPulse product training.",
+        "A separately approved research experiment would still need to preserve the original social-media provenance."
+      ],
+      "last_checked": "2026-08-25"
+    },
+    {
+      "id": "crisismmd",
+      "source_name": "CrisisMMD",
+      "source_url": "https://crisisnlp.qcri.org/crisismmd",
+      "doi": "",
+      "access_state": "public_project_page",
+      "license_state": "unknown",
+      "license_training_approved": false,
+      "article_text_availability": "social_posts_only",
+      "label_type": "multimodal crisis labels on social-media posts and images",
+      "compatibility_status": "low",
+      "compatibility_mapping": [
+        {
+          "source_label": "crisis informativeness and humanitarian categories",
+          "crisispulse_label": "no_direct_mapping",
+          "use": "optional_auxiliary_multimodal_research"
+        }
+      ],
+      "import_decision": "do_not_import_for_article_classifier_yet",
+      "training_decision": "blocked",
+      "evidence": [
+        {
+          "url": "https://crisisnlp.qcri.org/crisismmd",
+          "supports": "The project describes a labeled multimodal social-media crisis dataset."
+        }
+      ],
+      "notes": [
+        "The medium, event coverage, and labels do not directly match the CrisisPulse article classifier.",
+        "Image and social-post experiments are outside the current training milestone."
+      ],
+      "last_checked": "2026-08-25"
+    },
+    {
+      "id": "nugent-news-events",
+      "source_name": "Natural Disaster and Critical Event Detection from News",
+      "source_url": "https://doi.org/10.1109/BigData.2017.8258374",
+      "doi": "10.1109/BigData.2017.8258374",
+      "access_state": "publication_only_dataset_access_not_verified",
+      "license_state": "unknown",
+      "license_training_approved": false,
+      "article_text_availability": "not_verified",
+      "label_type": "human-annotated agency-news event classes",
+      "compatibility_status": "partial",
+      "compatibility_mapping": [
+        {
+          "source_label": "flood",
+          "crisispulse_label": "reported_flooding",
+          "use": "candidate_supervised_label_after_access_and_mapping_audit"
+        },
+        {
+          "source_label": "storms or none",
+          "crisispulse_label": "no_direct_mapping",
+          "use": "requires_manual_relabeling_for_warning_rain_and_unrelated_classes"
+        }
+      ],
+      "import_decision": "blocked_pending_dataset_access_license_and_text_review",
+      "training_decision": "blocked",
+      "evidence": [
+        {
+          "url": "https://doi.org/10.1109/BigData.2017.8258374",
+          "supports": "The primary publication describes human annotation of agency news into flood and other concrete-event classes."
+        }
+      ],
+      "notes": [
+        "The news medium and flood-event class are conceptually close to CrisisPulse.",
+        "No public corpus download or reusable dataset license was verified from the primary publication.",
+        "The non-flood classes still do not map cleanly to flood warning, heavy rain, and unrelated news."
+      ],
+      "last_checked": "2026-08-25"
+    },
+    {
+      "id": "trec-incident-streams",
+      "source_name": "TREC Incident Streams",
+      "source_url": "https://www.nist.gov/publications/incident-streams-2021-deep-end-deeper-annotations-and-evaluations-twitter",
+      "doi": "10.6028/NIST.SP.500-335",
+      "access_state": "publication_only_dataset_access_not_verified",
+      "license_state": "unknown",
+      "license_training_approved": false,
+      "article_text_availability": "social_posts_only",
+      "label_type": "crisis information-type and priority annotations on social-media posts",
+      "compatibility_status": "low",
+      "compatibility_mapping": [
+        {
+          "source_label": "incident information types and priority",
+          "crisispulse_label": "no_direct_mapping",
+          "use": "possible_future_severity_or_urgency_research"
+        }
+      ],
+      "import_decision": "do_not_import_for_article_classifier_yet",
+      "training_decision": "blocked",
+      "evidence": [
+        {
+          "url": "https://www.nist.gov/publications/incident-streams-2021-deep-end-deeper-annotations-and-evaluations-twitter",
+          "supports": "The NIST publication describes annotated social-media posts for crisis events, information types, and priority."
+        }
+      ],
+      "notes": [
+        "These annotations may inform a future urgency model but do not supply the current flood article labels.",
+        "Dataset access terms and any underlying platform-content restrictions must be reviewed separately."
+      ],
+      "last_checked": "2026-08-25"
+    }
+  ]
+}

@@ -1,3 +1,4 @@
+import json
 import socket
 from datetime import UTC, datetime, timedelta
 from urllib.error import HTTPError
@@ -7,8 +8,10 @@ import pytest
 
 from pipelines import publisher_titles
 from pipelines.publisher_titles import (
+    TITLE_PARSER_VERSION,
     add_publisher_titles,
     extract_publisher_title,
+    fetch_publisher_titles,
     normalize_publisher_title,
 )
 
@@ -44,6 +47,150 @@ def test_title_extraction_uses_json_ld_or_heading_when_metadata_is_generic():
     assert extract_publisher_title(
         "<html><body><h1>River evacuation order remains active</h1></body></html>"
     ) == "River evacuation order remains active"
+
+
+def test_title_extraction_prefers_matching_article_over_related_json_ld():
+    source_url = "https://news.example/region/todays-news-roundup"
+    html = """
+    <html><head>
+      <script type="application/ld+json">
+        {
+          "@context": "https://schema.org",
+          "@graph": [
+            {
+              "@type": "CollectionPage",
+              "hasPart": [
+                {
+                  "@type": "NewsArticle",
+                  "url": "https://news.example/weather/flood-watch",
+                  "headline": "Flood watch issued after heavy rain"
+                }
+              ]
+            },
+            {
+              "@type": "NewsArticle",
+              "mainEntityOfPage": {"@id": "https://news.example/region/todays-news-roundup"},
+              "headline": "Today: Street naming ceremony and weekend car show"
+            }
+          ]
+        }
+      </script>
+    </head></html>
+    """
+
+    assert extract_publisher_title(html, source_url) == (
+        "Today: Street naming ceremony and weekend car show"
+    )
+
+
+def test_title_extraction_ignores_untyped_nested_recommendation_headline():
+    html = """
+    <html><head>
+      <script type="application/ld+json">
+        {
+          "@type": "WebPage",
+          "recommendations": [
+            {"headline": "Flood cleanup continues in neighboring county"}
+          ]
+        }
+      </script>
+    </head><body>
+      <main><article><h1>City council approves the annual budget</h1></article></main>
+    </body></html>
+    """
+
+    assert extract_publisher_title(html) == "City council approves the annual budget"
+
+
+def test_title_extraction_prefers_article_heading_over_sidebar_heading():
+    html = """
+    <html><body>
+      <aside><h1>Latest flood and weather news</h1></aside>
+      <main><article><h1>Morning roundup: Transit changes and local events</h1></article></main>
+    </body></html>
+    """
+
+    assert extract_publisher_title(html) == (
+        "Morning roundup: Transit changes and local events"
+    )
+
+
+def test_title_extraction_ignores_body_card_headline_metadata():
+    html = """
+    <html><body>
+      <aside>
+        <meta itemprop="headline" content="Flood warning remains in effect">
+      </aside>
+      <h1>School board approves next year's calendar</h1>
+    </body></html>
+    """
+
+    assert extract_publisher_title(html) == (
+        "School board approves next year's calendar"
+    )
+
+
+def test_title_extraction_ignores_body_open_graph_card():
+    html = """
+    <html><body>
+      <aside><meta property="og:title" content="Flood card in related stories"></aside>
+      <main><article><h1>Library announces its fall schedule</h1></article></main>
+    </body></html>
+    """
+
+    assert extract_publisher_title(html) == "Library announces its fall schedule"
+
+
+def test_title_extraction_discards_json_ld_for_a_different_article():
+    source_url = "https://news.example/region/daily-roundup"
+    html = """
+    <html><head>
+      <script type="application/ld+json">
+        {
+          "@type": "CollectionPage",
+          "hasPart": {
+            "@type": "NewsArticle",
+            "url": "https://news.example/weather/flood-watch",
+            "headline": "Flood warning remains in effect"
+          }
+        }
+      </script>
+    </head><body>
+      <main><h1>Daily roundup: Road work and community events</h1></main>
+    </body></html>
+    """
+
+    assert extract_publisher_title(html, source_url) == (
+        "Daily roundup: Road work and community events"
+    )
+
+
+def test_title_extraction_keeps_semantic_query_when_matching_json_ld():
+    source_url = "https://news.example/view?id=1&utm_source=newsletter"
+    html = """
+    <html><head>
+      <script type="application/ld+json">
+        {
+          "@graph": [
+            {
+              "@type": "NewsArticle",
+              "url": "https://news.example/view?id=2",
+              "headline": "Flooding affects a different article"
+            },
+            {
+              "@type": "NewsArticle",
+              "url": "https://news.example/view?id=1",
+              "headline": "Council adopts a new transit plan"
+            }
+          ]
+        }
+      </script>
+    </head></html>
+    """
+
+    assert extract_publisher_title(html, source_url) == (
+        "Council adopts a new transit plan"
+    )
 
 
 def test_title_normalization_rejects_domains_routes_and_article_ids():
@@ -88,6 +235,44 @@ def test_title_cache_avoids_repeated_publisher_requests(tmp_path):
     assert calls == [url]
     assert stories[0]["title"] == "Flooding closes roads across the county"
     assert cached_stories[0]["title"] == stories[0]["title"]
+
+
+def test_title_cache_refetches_entries_from_an_older_parser(tmp_path):
+    cache_path = tmp_path / "publisher-title-cache.json"
+    url = "https://news.example/region/daily-roundup"
+    cache_path.write_text(
+        json.dumps(
+            {
+                "version": TITLE_PARSER_VERSION - 1,
+                "entries": {
+                    url: {
+                        "status": "ok",
+                        "title": "Flood headline from a related story",
+                        "fetched_at": "2026-08-25T12:00:00+00:00",
+                        "parser_version": TITLE_PARSER_VERSION - 1,
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    calls = []
+
+    def fetcher(requested_url: str) -> str:
+        calls.append(requested_url)
+        return "Daily roundup: Road work and community events"
+
+    titles = fetch_publisher_titles(
+        [url],
+        cache_path,
+        fetcher=fetcher,
+        now=datetime(2026, 8, 25, 13, tzinfo=UTC),
+    )
+
+    assert calls == [url]
+    assert titles[url] == "Daily roundup: Road work and community events"
+    refreshed = json.loads(cache_path.read_text(encoding="utf-8"))
+    assert refreshed["entries"][url]["parser_version"] == TITLE_PARSER_VERSION
 
 
 def test_public_url_check_rejects_private_network_destinations(monkeypatch):

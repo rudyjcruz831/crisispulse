@@ -281,6 +281,112 @@ def test_backup_is_verified_atomic_and_preserves_reviews(tmp_path: Path) -> None
     assert not list(backups.glob("*partial*"))
 
 
+def test_backup_accepts_mixed_legacy_and_detailed_article_labels(
+    tmp_path: Path,
+) -> None:
+    state, work, backups = _source_tree(tmp_path)
+    base_record = json.loads(
+        (state / "article-reviews.jsonl").read_text(encoding="utf-8")
+    )
+    records: list[dict[str, object]] = []
+    decisions = [
+        (1, "relevant"),
+        (1, "not_relevant"),
+        (1, "uncertain"),
+        (2, "reported_flooding"),
+        (2, "flood_risk_warning"),
+        (2, "heavy_rain_only"),
+        (2, "not_flood_related"),
+        (2, "uncertain"),
+    ]
+    for index, (version, decision) in enumerate(decisions):
+        record = dict(base_record)
+        record["article_id"] = format(index, "x") * 64
+        record["decision"] = decision
+        if version == 2:
+            record["decision_schema_version"] = 2
+            if decision == "reported_flooding":
+                record["tags"] = ["fatality", "heavy-rain", "daño"]
+        records.append(record)
+    (state / "article-reviews.jsonl").write_text(
+        "".join(json.dumps(record) + "\n" for record in records),
+        encoding="utf-8",
+    )
+    script = _normalized_script(BACKUP_SCRIPT, tmp_path / "backup.sh")
+
+    result = _run_alpine(script, state, work, backups)
+
+    assert result.returncode == 0, result.stderr
+    assert len(list(backups.glob("crisispulse-*.tar.gz"))) == 1
+
+
+def test_backup_accepts_null_as_an_empty_v2_article_tag_list(
+    tmp_path: Path,
+) -> None:
+    state, work, backups = _source_tree(tmp_path)
+    review_path = state / "article-reviews.jsonl"
+    record = json.loads(review_path.read_text(encoding="utf-8"))
+    record["decision_schema_version"] = 2
+    record["decision"] = "heavy_rain_only"
+    record["tags"] = None
+    review_path.write_text(json.dumps(record) + "\n", encoding="utf-8")
+    script = _normalized_script(BACKUP_SCRIPT, tmp_path / "backup.sh")
+
+    result = _run_alpine(script, state, work, backups)
+
+    assert result.returncode == 0, result.stderr
+    assert len(list(backups.glob("crisispulse-*.tar.gz"))) == 1
+
+
+def test_backup_rejects_article_label_from_the_wrong_schema_version(
+    tmp_path: Path,
+) -> None:
+    state, work, backups = _source_tree(tmp_path)
+    review_path = state / "article-reviews.jsonl"
+    record = json.loads(review_path.read_text(encoding="utf-8"))
+    record["decision_schema_version"] = 2
+    record["decision"] = "relevant"
+    review_path.write_text(json.dumps(record) + "\n", encoding="utf-8")
+    script = _normalized_script(BACKUP_SCRIPT, tmp_path / "backup.sh")
+
+    result = _run_alpine(script, state, work, backups)
+
+    assert result.returncode != 0
+    assert "invalid decision" in result.stderr.lower()
+    assert not list(backups.glob("crisispulse-*.tar.gz"))
+
+
+@pytest.mark.parametrize(
+    ("version", "tags"),
+    [
+        (2, ["Flood Damage"]),
+        (2, ["x" * 33]),
+        (2, ["fatality", "fatality"]),
+        (2, [f"tag-{index}" for index in range(9)]),
+        (1, ["fatality"]),
+    ],
+)
+def test_backup_rejects_invalid_article_tags(
+    tmp_path: Path,
+    version: int,
+    tags: list[str],
+) -> None:
+    state, work, backups = _source_tree(tmp_path)
+    review_path = state / "article-reviews.jsonl"
+    record = json.loads(review_path.read_text(encoding="utf-8"))
+    record["decision_schema_version"] = version
+    record["decision"] = "relevant" if version == 1 else "reported_flooding"
+    record["tags"] = tags
+    review_path.write_text(json.dumps(record) + "\n", encoding="utf-8")
+    script = _normalized_script(BACKUP_SCRIPT, tmp_path / "backup.sh")
+
+    result = _run_alpine(script, state, work, backups)
+
+    assert result.returncode != 0
+    assert "article tags" in result.stderr.lower()
+    assert not list(backups.glob("crisispulse-*.tar.gz"))
+
+
 def test_backup_cleans_stale_partial_files(tmp_path: Path) -> None:
     state, work, backups = _source_tree(tmp_path)
     stale = backups / "crisispulse-old.tar.gz.partial"

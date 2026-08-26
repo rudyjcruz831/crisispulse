@@ -3,6 +3,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.parse import urlparse
 
 import pytest
 import pipelines.run_refresh as refresh_module
@@ -12,6 +13,7 @@ from pipelines.run_refresh import (
     MAX_RECENT_RUNS,
     _prune_raw_files,
     _raw_storage_bytes,
+    _refresh_download_plan,
     _select_processing_files,
     _write_status,
 )
@@ -50,6 +52,110 @@ def test_processing_window_starts_at_first_complete_hour(tmp_path: Path) -> None
     assert [path.name for path in selected] == [
         f"{timestamp}{GKG_SUFFIX}" for timestamp in timestamps[3:]
     ]
+
+
+def test_refresh_download_plan_recovers_a_shutdown_gap(
+    tmp_path: Path,
+) -> None:
+    _touch_window(tmp_path, ["20260826070000"])
+    latest_url = (
+        "https://data.gdeltproject.org/gdeltv2/"
+        f"20260826114500{GKG_SUFFIX}"
+    )
+
+    source_urls, catch_up_urls, metrics = _refresh_download_plan(
+        tmp_path,
+        latest_url,
+        window_intervals=8,
+    )
+
+    assert len(source_urls) == 19
+    assert len(catch_up_urls) == 11
+    assert catch_up_urls[0].endswith(f"20260826071500{GKG_SUFFIX}")
+    assert catch_up_urls[-1].endswith(f"20260826094500{GKG_SUFFIX}")
+    assert source_urls[-1].endswith(f"20260826114500{GKG_SUFFIX}")
+    assert metrics == {
+        "catch_up_audited_intervals": 20,
+        "catch_up_requested_files": 11,
+        "catch_up_audit_capped": False,
+        "automatic_catch_up": True,
+    }
+
+
+def test_refresh_download_plan_recovers_internal_holes_without_duplicates(
+    tmp_path: Path,
+) -> None:
+    timestamps = [
+        f"20260826{hour:02d}{minute:02d}00"
+        for hour in range(7, 12)
+        for minute in (0, 15, 30, 45)
+        if (hour, minute) not in {(8, 15), (9, 30)}
+    ]
+    _touch_window(tmp_path, timestamps)
+    latest_url = (
+        "https://data.gdeltproject.org/gdeltv2/"
+        f"20260826114500{GKG_SUFFIX}"
+    )
+
+    source_urls, catch_up_urls, metrics = _refresh_download_plan(
+        tmp_path,
+        latest_url,
+        window_intervals=8,
+    )
+
+    assert len(source_urls) == 10
+    assert [Path(urlparse(url).path).name for url in catch_up_urls] == [
+        f"20260826081500{GKG_SUFFIX}",
+        f"20260826093000{GKG_SUFFIX}",
+    ]
+    assert len({Path(urlparse(url).path).name for url in source_urls}) == 10
+    assert metrics["catch_up_requested_files"] == 2
+    assert metrics["automatic_catch_up"] is True
+
+
+def test_refresh_download_plan_stays_normal_for_a_fresh_install(
+    tmp_path: Path,
+) -> None:
+    latest_url = (
+        "https://data.gdeltproject.org/gdeltv2/"
+        f"20260826114500{GKG_SUFFIX}"
+    )
+
+    source_urls, catch_up_urls, metrics = _refresh_download_plan(
+        tmp_path,
+        latest_url,
+        window_intervals=8,
+    )
+
+    assert len(source_urls) == 8
+    assert catch_up_urls == []
+    assert metrics == {
+        "catch_up_audited_intervals": 0,
+        "catch_up_requested_files": 0,
+        "catch_up_audit_capped": False,
+        "automatic_catch_up": False,
+    }
+
+
+def test_refresh_download_plan_caps_a_long_outage_at_seven_days(
+    tmp_path: Path,
+) -> None:
+    _touch_window(tmp_path, ["20260815000000"])
+    latest_url = (
+        "https://data.gdeltproject.org/gdeltv2/"
+        f"20260826114500{GKG_SUFFIX}"
+    )
+
+    source_urls, catch_up_urls, metrics = _refresh_download_plan(
+        tmp_path,
+        latest_url,
+        window_intervals=8,
+    )
+
+    assert len(source_urls) == 7 * 24 * 4
+    assert len(catch_up_urls) == (7 * 24 * 4) - 8
+    assert metrics["catch_up_audit_capped"] is True
+    assert len({Path(urlparse(url).path).name for url in source_urls}) == len(source_urls)
 
 
 def test_raw_retention_keeps_newest_files_under_byte_budget(tmp_path: Path) -> None:

@@ -33,3 +33,40 @@ def test_review_evaluation_excludes_uncertain_labels(tmp_path: Path) -> None:
     assert report["primary_region"]["labeled_rows"] == 3
     assert report["primary_region"]["uncertain_rows"] == 1
     assert report["primary_region"]["accuracy"] == 2 / 3
+
+
+def test_review_evaluation_reports_detailed_training_classes(
+    tmp_path: Path,
+) -> None:
+    review_path = tmp_path / "review-detailed.csv"
+    fieldnames = [
+        "disaster_match_strength",
+        "location_selection_status",
+        "country_code",
+        "adm1_code",
+        "label_disaster_relevance",
+        "label_primary_region",
+    ]
+    rows = [
+        ["high", "single_region", "US", "USNJ", "reported_flooding", "US:USNJ"],
+        ["high", "single_region", "US", "USNJ", "flood_risk_warning", "US:USNJ"],
+        ["weak", "single_region", "US", "USNJ", "heavy_rain_only", "US:USNJ"],
+        ["weak", "single_region", "US", "USNJ", "not_flood_related", "US:USNJ"],
+        ["weak", "missing", "", "", "uncertain", "uncertain"],
+    ]
+    with review_path.open("w", encoding="utf-8", newline="") as stream:
+        writer = csv.writer(stream)
+        writer.writerow(fieldnames)
+        writer.writerows(rows)
+
+    report = evaluate_review(review_path)
+
+    assert report["relevance"]["labeled_rows"] == 4
+    assert report["relevance"]["uncertain_rows"] == 1
+    assert report["relevance"]["relevant_rows"] == 2
+    assert report["relevance"]["overall_relevance_rate"] == 0.5
+    assert report["relevance"]["class_counts"]["reported_flooding"] == 1
+    assert report["relevance"]["class_counts"]["flood_risk_warning"] == 1
+    assert report["relevance"]["class_counts"]["heavy_rain_only"] == 1
+    assert report["relevance"]["class_counts"]["not_flood_related"] == 1
+    assert report["relevance"]["class_counts"]["uncertain"] == 1

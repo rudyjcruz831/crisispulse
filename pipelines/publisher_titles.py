@@ -17,7 +17,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
-from urllib.parse import urljoin, urlparse, urlunparse
+from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 from urllib.request import (
     HTTPHandler,
     HTTPRedirectHandler,
@@ -38,7 +38,7 @@ MAX_CACHE_ENTRIES = 2048
 FETCH_TIMEOUT_SECONDS = 4
 SUCCESS_TTL = timedelta(days=30)
 MISS_TTL = timedelta(hours=6)
-TITLE_PARSER_VERSION = 3
+TITLE_PARSER_VERSION = 4
 MAX_JSON_LD_BYTES = 128 * 1024
 MAX_JSON_LD_NODES = 256
 GENERIC_PUBLISHER_TITLES = {
@@ -62,22 +62,44 @@ class _PublisherTitleParser(HTMLParser):
         self._title_parts: list[str] = []
         self._inside_h1 = False
         self._current_h1_parts: list[str] = []
+        self._current_h1_scoped = False
         self._headings: list[str] = []
+        self._scoped_headings: list[str] = []
+        self._head_depth = 0
+        self._body_started = False
+        self._main_depth = 0
+        self._article_depth = 0
         self._inside_json_ld = False
         self._current_json_ld_parts: list[str] = []
         self._json_ld_blocks: list[str] = []
-        self._metadata: list[str] = []
+        self._metadata: dict[str, list[str]] = {
+            "og:title": [],
+            "twitter:title": [],
+            "title": [],
+            "headline": [],
+        }
 
     def handle_starttag(
         self, tag: str, attrs: list[tuple[str, str | None]]
     ) -> None:
         lowered_tag = tag.lower()
+        if lowered_tag == "head":
+            self._head_depth += 1
+        elif lowered_tag == "body":
+            self._body_started = True
+        elif lowered_tag == "main":
+            self._main_depth += 1
+        elif lowered_tag == "article":
+            self._article_depth += 1
         if lowered_tag == "title":
             self._inside_title = True
             return
         if lowered_tag == "h1":
             self._inside_h1 = True
             self._current_h1_parts = []
+            self._current_h1_scoped = (
+                self._main_depth > 0 or self._article_depth > 0
+            )
             return
         if lowered_tag == "script":
             values = {
@@ -102,8 +124,12 @@ class _PublisherTitleParser(HTMLParser):
             or values.get("itemprop")
             or ""
         ).lower()
-        if key in {"og:title", "twitter:title", "title", "headline"} and values.get("content"):
-            self._metadata.append(values["content"])
+        if (
+            key in self._metadata
+            and values.get("content")
+            and (self._head_depth > 0 or not self._body_started)
+        ):
+            self._metadata[key].append(values["content"])
 
     def handle_endtag(self, tag: str) -> None:
         lowered_tag = tag.lower()
@@ -111,14 +137,24 @@ class _PublisherTitleParser(HTMLParser):
             self._inside_title = False
         elif lowered_tag == "h1" and self._inside_h1:
             self._inside_h1 = False
-            self._headings.append(" ".join(self._current_h1_parts))
+            heading = " ".join(self._current_h1_parts)
+            self._headings.append(heading)
+            if self._current_h1_scoped:
+                self._scoped_headings.append(heading)
             self._current_h1_parts = []
+            self._current_h1_scoped = False
         elif lowered_tag == "script" and self._inside_json_ld:
             self._inside_json_ld = False
             block = "".join(self._current_json_ld_parts)
             if len(block.encode("utf-8", errors="ignore")) <= MAX_JSON_LD_BYTES:
                 self._json_ld_blocks.append(block)
             self._current_json_ld_parts = []
+        if lowered_tag == "head" and self._head_depth > 0:
+            self._head_depth -= 1
+        elif lowered_tag == "article" and self._article_depth > 0:
+            self._article_depth -= 1
+        elif lowered_tag == "main" and self._main_depth > 0:
+            self._main_depth -= 1
 
     def handle_data(self, data: str) -> None:
         if self._inside_title:
@@ -129,9 +165,18 @@ class _PublisherTitleParser(HTMLParser):
             self._current_json_ld_parts.append(data)
 
     def best_title(self, source_url: str | None = None) -> str | None:
+        matched_json_ld, fallback_json_ld = _json_ld_headline_groups(
+            self._json_ld_blocks,
+            source_url,
+        )
         candidates = [
-            *self._metadata,
-            *_json_ld_headlines(self._json_ld_blocks),
+            *self._metadata["og:title"],
+            *self._metadata["twitter:title"],
+            *matched_json_ld,
+            *self._scoped_headings,
+            *fallback_json_ld,
+            *self._metadata["headline"],
+            *self._metadata["title"],
             *self._headings,
             " ".join(self._title_parts),
         ]
@@ -142,12 +187,65 @@ class _PublisherTitleParser(HTMLParser):
         return None
 
 
-def _json_ld_headlines(blocks: list[str]) -> list[str]:
+def _normalized_document_url(
+    value: Any,
+    source_url: str | None = None,
+) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        absolute = urljoin(source_url or "", value.strip())
+        parsed = urlparse(absolute)
+        hostname = (parsed.hostname or "").casefold().removeprefix("www.")
+        if parsed.scheme.casefold() not in {"http", "https"} or not hostname:
+            return None
+        port = parsed.port
+    except ValueError:
+        return None
+    default_port = (parsed.scheme.casefold() == "http" and port == 80) or (
+        parsed.scheme.casefold() == "https" and port == 443
+    )
+    authority = hostname if port is None or default_port else f"{hostname}:{port}"
+    path = parsed.path.rstrip("/") or "/"
+    query_pairs = [
+        (key, item)
+        for key, item in parse_qsl(parsed.query, keep_blank_values=True)
+        if not key.casefold().startswith("utm_")
+        and key.casefold() not in {"fbclid", "gclid", "mc_cid", "mc_eid"}
+    ]
+    query = urlencode(sorted(query_pairs))
+    return f"{authority}{path}{f'?{query}' if query else ''}"
+
+
+def _json_ld_node_urls(value: dict[str, Any]) -> list[str]:
     candidates: list[str] = []
+    for key in ("url", "@id"):
+        candidate = value.get(key)
+        if isinstance(candidate, str):
+            candidates.append(candidate)
+    main_entity = value.get("mainEntityOfPage")
+    if isinstance(main_entity, str):
+        candidates.append(main_entity)
+    elif isinstance(main_entity, dict):
+        for key in ("url", "@id"):
+            candidate = main_entity.get(key)
+            if isinstance(candidate, str):
+                candidates.append(candidate)
+    return candidates
+
+
+def _json_ld_headline_groups(
+    blocks: list[str],
+    source_url: str | None = None,
+) -> tuple[list[str], list[str]]:
+    matched_candidates: list[tuple[int, str]] = []
+    fallback_candidates: list[tuple[int, str]] = []
     visited = 0
+    order = 0
+    normalized_source_url = _normalized_document_url(source_url)
 
     def visit(value: Any, depth: int = 0) -> None:
-        nonlocal visited
+        nonlocal order, visited
         if depth > 8 or visited >= MAX_JSON_LD_NODES:
             return
         visited += 1
@@ -157,9 +255,6 @@ def _json_ld_headlines(blocks: list[str]) -> list[str]:
             return
         if not isinstance(value, dict):
             return
-        headline = value.get("headline")
-        if isinstance(headline, str):
-            candidates.append(headline)
         type_value = value.get("@type")
         types = type_value if isinstance(type_value, list) else [type_value]
         is_article = any(
@@ -167,9 +262,36 @@ def _json_ld_headlines(blocks: list[str]) -> list[str]:
             and ("article" in item.casefold() or item.casefold() in {"newsstory", "reportage"})
             for item in types
         )
-        name = value.get("name")
-        if is_article and isinstance(name, str):
-            candidates.append(name)
+        if is_article:
+            normalized_node_urls = {
+                normalized
+                for candidate in _json_ld_node_urls(value)
+                if (normalized := _normalized_document_url(candidate, source_url))
+            }
+            url_matches = bool(
+                normalized_source_url
+                and normalized_source_url in normalized_node_urls
+            )
+            url_mismatches = bool(
+                normalized_source_url
+                and normalized_node_urls
+                and not url_matches
+            )
+            if not url_mismatches and (url_matches or depth == 0):
+                target = matched_candidates if url_matches else fallback_candidates
+                for key in ("headline", "name"):
+                    candidate = value.get(key)
+                    if isinstance(candidate, str):
+                        target.append((order, candidate))
+                        order += 1
+        elif depth == 0:
+            # Some publishers omit @type on a simple top-level article object.
+            # Never accept nested untyped headlines because those commonly
+            # describe recommendations, navigation cards, or live-blog items.
+            headline = value.get("headline")
+            if isinstance(headline, str):
+                fallback_candidates.append((order, headline))
+                order += 1
         for nested in value.values():
             if isinstance(nested, (dict, list)):
                 visit(nested, depth + 1)
@@ -180,7 +302,10 @@ def _json_ld_headlines(blocks: list[str]) -> list[str]:
         except (json.JSONDecodeError, TypeError):
             continue
         visit(payload)
-    return candidates
+    return (
+        [candidate for _order, candidate in sorted(matched_candidates)],
+        [candidate for _order, candidate in sorted(fallback_candidates)],
+    )
 
 
 def _looks_like_domain_title(title: str, source_url: str | None) -> bool:
