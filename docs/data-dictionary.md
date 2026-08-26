@@ -45,7 +45,18 @@ Current quality flags are `invalid_url`, `invalid_seen_at`, `missing_location`, 
 
 Human decisions are stored separately in append-only `article-reviews.jsonl`. Version 2 records include `decision_schema_version: 2`, one of `reported_flooding`, `flood_risk_warning`, `heavy_rain_only`, `not_flood_related`, or `uncertain`, and an optional `tags` array. Tags are distinct lowercase Unicode letter/digit slugs, limited to eight values and 32 characters each. They capture secondary context such as `fatality`, `heavy-rain`, `flood-damage`, or `cleanup`; they never replace the primary decision. The API collapses corrections to the latest decision per `article_id` while retaining earlier audit entries on disk. Historical records without a schema-version field use the coarser version 1 values `relevant`, `not_relevant`, or `uncertain`; they remain valid audit evidence but require a new detailed answer before entering version 2 measurements or training data.
 
-The detailed decision order is: reported physical flooding; otherwise explicit flood risk/watch/warning; otherwise heavy rain or severe weather without flood evidence; otherwise unrelated content. Use `uncertain` only when the source cannot support a decision. The API export includes the schema version and pipe-separated custom tags so downstream work can select only the latest version 2 label per article and join it to the permanent archive by `article_id`.
+The detailed decision order is: reported physical flooding; otherwise explicit flood risk/watch/warning; otherwise heavy rain or severe weather without flood evidence; otherwise unrelated content. Use `uncertain` only when the source cannot support a decision. The quality API export includes the schema version and pipe-separated custom tags. The Training Data Lab endpoints below additionally identify which latest labels are eligible and can be joined to the permanent archive by `article_id`.
+
+## Training Data Lab derived fields
+
+The Training Data Lab API and its audit CSV derive these fields from the latest valid review record for each `article_id`. They are not stored as new fields in the append-only review log.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `training_eligible` | boolean | `true` only when the latest decision uses schema version 2 and is one of `reported_flooding`, `flood_risk_warning`, `heavy_rain_only`, or `not_flood_related`. It does not assert that the overall dataset is large or balanced enough for model training. |
+| `exclusion_reason` | string | Empty for eligible rows, `uncertain` for a version 2 uncertain label, or `legacy_schema` for a version 1 label. Historical records with no stored schema version are read as version 1. |
+
+Corrections remain append-only on disk, but the Training Data Lab exposes only the newest decision per article. Consequently, an earlier eligible label can become excluded after an uncertain correction, and a corrected version 2 label can replace a legacy label in the derived view without deleting either audit entry.
 
 ## Regional/hourly feature Parquet
 

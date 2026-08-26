@@ -29,6 +29,7 @@ const (
 	minimumArticleReviewSample = 20
 	minimumStratumReviews      = 5
 	articleDecisionSchemaV2    = 2
+	trainingDataSchemaVersion  = 1
 	maximumArticleReviewTags   = 8
 	maximumArticleTagRunes     = 32
 )
@@ -103,6 +104,26 @@ type articleReviewSummaryResponse struct {
 	HighMatchFloodRelatedRate *float64 `json:"high_match_flood_related_rate"`
 	WeakMatchFloodRelatedRate *float64 `json:"weak_match_flood_related_rate"`
 	Status                    string   `json:"status"`
+}
+
+type trainingArticle struct {
+	articleReviewRecord
+	TrainingEligible bool   `json:"training_eligible"`
+	ExclusionReason  string `json:"exclusion_reason"`
+}
+
+type trainingArticleSummary struct {
+	TotalArticles         int            `json:"total_articles"`
+	TrainingEligible      int            `json:"training_eligible"`
+	Excluded              int            `json:"excluded"`
+	ClassCounts           map[string]int `json:"class_counts"`
+	ExclusionReasonCounts map[string]int `json:"exclusion_reason_counts"`
+}
+
+type trainingArticlesResponse struct {
+	SchemaVersion int                    `json:"schema_version"`
+	Summary       trainingArticleSummary `json:"summary"`
+	Articles      []trainingArticle      `json:"articles"`
 }
 
 type articleReviewStore struct {
@@ -262,6 +283,127 @@ func summarizeArticleReviews(reviews []articleReviewRecord) articleReviewSummary
 	return summary
 }
 
+func (service *api) trainingArticles(writer http.ResponseWriter, request *http.Request) {
+	if !requireGet(writer, request) {
+		return
+	}
+	reviews, err := service.articleReviews.list()
+	if err != nil {
+		service.logger.Printf("training articles unavailable: %v", err)
+		writeError(writer, http.StatusInternalServerError, "training articles unavailable")
+		return
+	}
+	writer.Header().Set("Cache-Control", "no-store")
+	writeJSON(writer, http.StatusOK, buildTrainingArticlesResponse(reviews))
+}
+
+func buildTrainingArticlesResponse(reviews []articleReviewRecord) trainingArticlesResponse {
+	response := trainingArticlesResponse{
+		SchemaVersion: trainingDataSchemaVersion,
+		Summary: trainingArticleSummary{
+			TotalArticles: len(reviews),
+			ClassCounts: map[string]int{
+				"reported_flooding":  0,
+				"flood_risk_warning": 0,
+				"heavy_rain_only":    0,
+				"not_flood_related":  0,
+			},
+			ExclusionReasonCounts: map[string]int{
+				"legacy_schema": 0,
+				"uncertain":     0,
+			},
+		},
+		Articles: make([]trainingArticle, 0, len(reviews)),
+	}
+	for _, review := range reviews {
+		eligible, reason := articleTrainingEligibility(review)
+		response.Articles = append(response.Articles, trainingArticle{
+			articleReviewRecord: review,
+			TrainingEligible:    eligible,
+			ExclusionReason:     reason,
+		})
+		if eligible {
+			response.Summary.TrainingEligible++
+			response.Summary.ClassCounts[review.Decision]++
+			continue
+		}
+		response.Summary.Excluded++
+		response.Summary.ExclusionReasonCounts[reason]++
+	}
+	return response
+}
+
+func articleTrainingEligibility(review articleReviewRecord) (bool, string) {
+	if review.DecisionSchemaVersion != articleDecisionSchemaV2 {
+		return false, "legacy_schema"
+	}
+	switch review.Decision {
+	case "reported_flooding", "flood_risk_warning", "heavy_rain_only", "not_flood_related":
+		return true, ""
+	case "uncertain":
+		return false, "uncertain"
+	default:
+		return false, "unsupported_label"
+	}
+}
+
+func (service *api) trainingArticleExport(writer http.ResponseWriter, request *http.Request) {
+	if !requireGet(writer, request) {
+		return
+	}
+	reviews, err := service.articleReviews.list()
+	if err != nil {
+		service.logger.Printf("training article export unavailable: %v", err)
+		writeError(writer, http.StatusInternalServerError, "training article export unavailable")
+		return
+	}
+
+	var output bytes.Buffer
+	_, _ = output.Write([]byte{0xef, 0xbb, 0xbf})
+	csvWriter := csv.NewWriter(&output)
+	csvWriter.UseCRLF = true
+	columns := []string{"article_id", "title", "url", "source_domain", "match_strength", "review_bucket", "decision", "decision_schema_version", "reviewed_at", "tags", "training_eligible", "exclusion_reason"}
+	if err := csvWriter.Write(columns); err != nil {
+		writeError(writer, http.StatusInternalServerError, "training article export unavailable")
+		return
+	}
+	for _, article := range buildTrainingArticlesResponse(reviews).Articles {
+		row := []string{
+			article.ArticleID,
+			article.Title,
+			article.URL,
+			article.SourceDomain,
+			article.MatchStrength,
+			article.ReviewBucket,
+			article.Decision,
+			fmt.Sprintf("%d", article.DecisionSchemaVersion),
+			article.ReviewedAt,
+			strings.Join(article.Tags, "|"),
+			fmt.Sprintf("%t", article.TrainingEligible),
+			article.ExclusionReason,
+		}
+		for index := range row {
+			row[index] = articleSpreadsheetSafe(row[index])
+		}
+		if err := csvWriter.Write(row); err != nil {
+			writeError(writer, http.StatusInternalServerError, "training article export unavailable")
+			return
+		}
+	}
+	csvWriter.Flush()
+	if csvWriter.Error() != nil {
+		writeError(writer, http.StatusInternalServerError, "training article export unavailable")
+		return
+	}
+	writer.Header().Set("Cache-Control", "no-store")
+	writer.Header().Set("Content-Disposition", `attachment; filename="crisispulse-training-articles.csv"`)
+	writer.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	writer.WriteHeader(http.StatusOK)
+	if request.Method != http.MethodHead {
+		_, _ = writer.Write(output.Bytes())
+	}
+}
+
 func (service *api) qualityArticleExport(writer http.ResponseWriter, request *http.Request) {
 	if !requireGet(writer, request) {
 		return
@@ -281,7 +423,7 @@ func (service *api) qualityArticleExport(writer http.ResponseWriter, request *ht
 	for _, review := range reviews {
 		row := []string{review.ArticleID, review.Title, review.URL, review.SourceDomain, review.MatchStrength, review.ReviewBucket, review.Decision, fmt.Sprintf("%d", review.DecisionSchemaVersion), review.ReviewedAt, strings.Join(review.Tags, "|")}
 		for index := range row {
-			row[index] = spreadsheetSafe(row[index])
+			row[index] = articleSpreadsheetSafe(row[index])
 		}
 		if err := csvWriter.Write(row); err != nil {
 			writeError(writer, http.StatusInternalServerError, "article review export unavailable")
@@ -300,6 +442,17 @@ func (service *api) qualityArticleExport(writer http.ResponseWriter, request *ht
 	if request.Method != http.MethodHead {
 		_, _ = writer.Write(output.Bytes())
 	}
+}
+
+func articleSpreadsheetSafe(value string) string {
+	candidate := strings.TrimLeft(value, " \n")
+	if candidate != "" {
+		first, _ := utf8.DecodeRuneInString(candidate)
+		if strings.ContainsRune("=+-@\t\r", first) {
+			return "'" + value
+		}
+	}
+	return value
 }
 
 func (service *api) loadQualitySample() (qualitySampleFile, error) {

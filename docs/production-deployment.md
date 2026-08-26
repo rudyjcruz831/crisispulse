@@ -69,7 +69,7 @@ After the short soak test passes, install the permanent local production schedul
 powershell -ExecutionPolicy Bypass -File .\scripts\install-production-refresh-task.ps1
 ```
 
-It repeats every 15 minutes until explicitly removed, starts a missed run when Windows becomes available, skips overlap, and attempts to launch Docker Desktop when the engine is stopped. Collection occurs only while the PC is on, the user is signed in, and internet access is available; after sleep or shutdown, the next available run catches up from the newest overlap. Remove only the schedule with `scripts/uninstall-production-refresh-task.ps1`; this does not remove raw data, permanent history, reviews, or backups.
+It repeats every 15 minutes until explicitly removed, starts a missed run when Windows becomes available, skips overlap, and attempts to launch Docker Desktop when the engine is stopped. The scheduled action uses the hidden Windows Script Host launcher, so it does not flash a PowerShell or Docker terminal during normal runs. Collection occurs only while the PC is on, the user is signed in, and internet access is available; after sleep or shutdown, the next available run catches up from the newest overlap. Remove only the schedule with `scripts/uninstall-production-refresh-task.ps1`; this does not remove raw data, permanent history, reviews, or backups.
 
 ## First paid server
 

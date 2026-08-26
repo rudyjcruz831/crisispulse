@@ -418,3 +418,228 @@ func TestArticleQualityCSVExportIncludesDecisionSchemaVersion(t *testing.T) {
 		t.Fatalf("CSV rows = %#v", rows)
 	}
 }
+
+func trainingReviewFixture(idCharacter, decision string, schemaVersion int, reviewedAt string) articleReviewRecord {
+	return articleReviewRecord{
+		ArticleID:             strings.Repeat(idCharacter, 64),
+		Title:                 "Training article " + idCharacter,
+		URL:                   "https://news.example/training-article-" + idCharacter,
+		SourceDomain:          "news.example",
+		MatchStrength:         "high",
+		ReviewBucket:          "high_match",
+		Decision:              decision,
+		DecisionSchemaVersion: schemaVersion,
+		ReviewedAt:            reviewedAt,
+	}
+}
+
+func writeTrainingReviewFixtures(t *testing.T, reviewPath string, reviews []articleReviewRecord) {
+	t.Helper()
+	var contents bytes.Buffer
+	encoder := json.NewEncoder(&contents)
+	for _, review := range reviews {
+		if err := encoder.Encode(review); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(reviewPath, contents.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTrainingArticlesReturnsLatestLabelsWithEligibilitySummary(t *testing.T) {
+	handler, reviewPath := testQualityHandlerWithReviewPath(t)
+	reviews := []articleReviewRecord{
+		trainingReviewFixture("0", "reported_flooding", articleDecisionSchemaV2, "2026-08-24T10:00:00Z"),
+		trainingReviewFixture("1", "flood_risk_warning", articleDecisionSchemaV2, "2026-08-24T11:00:00Z"),
+		trainingReviewFixture("2", "heavy_rain_only", articleDecisionSchemaV2, "2026-08-24T12:00:00Z"),
+		trainingReviewFixture("3", "not_flood_related", articleDecisionSchemaV2, "2026-08-24T13:00:00Z"),
+		trainingReviewFixture("4", "uncertain", articleDecisionSchemaV2, "2026-08-24T14:00:00Z"),
+		trainingReviewFixture("5", "relevant", 1, "2026-08-24T15:00:00Z"),
+	}
+	reviews[0].Tags = []string{"flash-flood", "fatality"}
+	writeTrainingReviewFixtures(t, reviewPath, reviews)
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/training/articles", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if response.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("Cache-Control = %q", response.Header().Get("Cache-Control"))
+	}
+	if !strings.Contains(response.Body.String(), `"exclusion_reason":""`) {
+		t.Fatalf("eligible article did not expose an explicit exclusion reason: %s", response.Body.String())
+	}
+
+	var result trainingArticlesResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.SchemaVersion != trainingDataSchemaVersion || result.Summary.TotalArticles != 6 || result.Summary.TrainingEligible != 4 || result.Summary.Excluded != 2 {
+		t.Fatalf("summary = %+v", result)
+	}
+	for _, decision := range []string{"reported_flooding", "flood_risk_warning", "heavy_rain_only", "not_flood_related"} {
+		if result.Summary.ClassCounts[decision] != 1 {
+			t.Fatalf("class counts = %#v", result.Summary.ClassCounts)
+		}
+	}
+	if result.Summary.ExclusionReasonCounts["uncertain"] != 1 || result.Summary.ExclusionReasonCounts["legacy_schema"] != 1 {
+		t.Fatalf("exclusion counts = %#v", result.Summary.ExclusionReasonCounts)
+	}
+	if len(result.Articles) != 6 {
+		t.Fatalf("articles = %+v", result.Articles)
+	}
+	byDecision := make(map[string]trainingArticle, len(result.Articles))
+	for _, article := range result.Articles {
+		byDecision[article.Decision] = article
+	}
+	for _, decision := range []string{"reported_flooding", "flood_risk_warning", "heavy_rain_only", "not_flood_related"} {
+		if article := byDecision[decision]; !article.TrainingEligible || article.ExclusionReason != "" {
+			t.Fatalf("eligible article %q = %+v", decision, article)
+		}
+	}
+	if article := byDecision["uncertain"]; article.TrainingEligible || article.ExclusionReason != "uncertain" {
+		t.Fatalf("uncertain article = %+v", article)
+	}
+	if article := byDecision["relevant"]; article.TrainingEligible || article.ExclusionReason != "legacy_schema" {
+		t.Fatalf("legacy article = %+v", article)
+	}
+	if got := strings.Join(byDecision["reported_flooding"].Tags, ","); got != "flash-flood,fatality" {
+		t.Fatalf("eligible tags = %q", got)
+	}
+}
+
+func TestTrainingArticlesEmptyStoreHasStableZeroCounts(t *testing.T) {
+	handler := testQualityHandler(t)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/training/articles", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var result trainingArticlesResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Summary.TotalArticles != 0 || result.Summary.TrainingEligible != 0 || result.Summary.Excluded != 0 || len(result.Articles) != 0 {
+		t.Fatalf("response = %+v", result)
+	}
+	if len(result.Summary.ClassCounts) != 4 || len(result.Summary.ExclusionReasonCounts) != 2 {
+		t.Fatalf("stable count keys are missing: %+v", result.Summary)
+	}
+}
+
+func TestTrainingArticlesCorrectionUsesLatestWhileHistoryRemainsAppendOnly(t *testing.T) {
+	handler, reviewPath := testQualityHandlerWithReviewPath(t)
+	articleID := strings.Repeat("0", 64)
+	first := postQualityReview(t, handler, articleID, "reported_flooding", []string{"flash-flood"})
+	if first.Code != http.StatusCreated {
+		t.Fatalf("first review = %d %s", first.Code, first.Body.String())
+	}
+	correction := postQualityReview(t, handler, articleID, "uncertain", []string{"needs-context"})
+	if correction.Code != http.StatusCreated {
+		t.Fatalf("correction = %d %s", correction.Code, correction.Body.String())
+	}
+	raw, err := os.ReadFile(reviewPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lines := strings.Split(strings.TrimSpace(string(raw)), "\n"); len(lines) != 2 {
+		t.Fatalf("append-only history has %d entries: %s", len(lines), raw)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/training/articles", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	var result trainingArticlesResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Articles) != 1 || result.Summary.TrainingEligible != 0 || result.Summary.Excluded != 1 {
+		t.Fatalf("response = %+v", result)
+	}
+	article := result.Articles[0]
+	if article.Decision != "uncertain" || article.TrainingEligible || article.ExclusionReason != "uncertain" || strings.Join(article.Tags, ",") != "needs-context" {
+		t.Fatalf("latest correction = %+v", article)
+	}
+}
+
+func TestTrainingArticleCSVIsExcelCompatibleAudit(t *testing.T) {
+	handler, reviewPath := testQualityHandlerWithReviewPath(t)
+	eligible := trainingReviewFixture("0", "reported_flooding", articleDecisionSchemaV2, "2026-08-24T10:00:00Z")
+	eligible.Title = `=HYPERLINK("https://malicious.example","click")`
+	eligible.SourceDomain = "\tnews.example"
+	eligible.Tags = []string{"flash-flood", "fatality"}
+	legacy := trainingReviewFixture("1", "not_relevant", 1, "2026-08-24T11:00:00Z")
+	writeTrainingReviewFixtures(t, reviewPath, []articleReviewRecord{eligible, legacy})
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/training/articles/export.csv", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if got := response.Header().Get("Content-Disposition"); !strings.Contains(got, "crisispulse-training-articles.csv") {
+		t.Fatalf("Content-Disposition = %q", got)
+	}
+	raw := response.Body.Bytes()
+	if !bytes.HasPrefix(raw, []byte{0xef, 0xbb, 0xbf}) || !bytes.Contains(raw, []byte("\r\n")) {
+		t.Fatalf("CSV lacks UTF-8 BOM or CRLF rows: %q", raw)
+	}
+	rows, err := csv.NewReader(bytes.NewReader(bytes.TrimPrefix(raw, []byte{0xef, 0xbb, 0xbf}))).ReadAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 3 || len(rows[0]) != 12 || rows[0][10] != "training_eligible" || rows[0][11] != "exclusion_reason" {
+		t.Fatalf("CSV rows = %#v", rows)
+	}
+	byDecision := make(map[string][]string, 2)
+	for _, row := range rows[1:] {
+		byDecision[row[6]] = row
+	}
+	if row := byDecision["reported_flooding"]; row[1] != `'=HYPERLINK("https://malicious.example","click")` || row[3] != "'\tnews.example" || row[9] != "flash-flood|fatality" || row[10] != "true" || row[11] != "" {
+		t.Fatalf("eligible CSV row = %#v", row)
+	}
+	if row := byDecision["not_relevant"]; row[10] != "false" || row[11] != "legacy_schema" {
+		t.Fatalf("legacy CSV row = %#v", row)
+	}
+}
+
+func TestArticleSpreadsheetSafeNeutralizesEveryDangerousPrefix(t *testing.T) {
+	tests := []string{
+		"=formula",
+		"+formula",
+		"-formula",
+		"@formula",
+		"\tplain text",
+		"\rplain text",
+		"  =formula",
+		"  \tplain text",
+	}
+	for _, value := range tests {
+		if got := articleSpreadsheetSafe(value); got != "'"+value {
+			t.Errorf("articleSpreadsheetSafe(%q) = %q", value, got)
+		}
+	}
+	for _, value := range []string{"plain text", "https://news.example/story", "2", "", "\nplain text"} {
+		if got := articleSpreadsheetSafe(value); got != value {
+			t.Errorf("articleSpreadsheetSafe(%q) = %q", value, got)
+		}
+	}
+}
+
+func TestTrainingArticleEndpointsRejectWrites(t *testing.T) {
+	handler := testQualityHandler(t)
+	for _, path := range []string{"/api/v1/training/articles", "/api/v1/training/articles/export.csv"} {
+		t.Run(path, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{}`))
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != http.StatusMethodNotAllowed || response.Header().Get("Allow") != "GET, HEAD" {
+				t.Fatalf("status = %d, Allow = %q, body = %s", response.Code, response.Header().Get("Allow"), response.Body.String())
+			}
+		})
+	}
+}

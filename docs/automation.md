@@ -41,7 +41,7 @@ After the manual run succeeds:
 powershell -ExecutionPolicy Bypass -File .\scripts\install-refresh-task.ps1
 ```
 
-The task runs only on this PC under Windows Task Scheduler. It does not create a Codex automation, cloud job, account, or paid resource. By default, Task Scheduler skips concurrent instances and starts a missed run when the PC becomes available.
+The task runs only on this PC under Windows Task Scheduler. It does not create a Codex automation, cloud job, account, or paid resource. It uses the Windows Script Host launcher with a hidden window, so normal refreshes do not flash a terminal on the desktop. By default, Task Scheduler skips concurrent instances and starts a missed run when the PC becomes available.
 
 ## Disable automation
 

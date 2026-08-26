@@ -182,16 +182,17 @@ type adminStatusResponse struct {
 }
 
 type api struct {
-	dataPath          string
-	statusPath        string
-	backupStatusPath  string
-	qualitySamplePath string
-	reviews           *reviewStore
-	articleReviews    *articleReviewStore
-	logger            *log.Logger
-	backupVerifyMu    sync.Mutex
-	backupVerifyCache backupVerificationCache
-	backupHasher      func(string) (string, int64, error)
+	dataPath           string
+	statusPath         string
+	backupStatusPath   string
+	qualitySamplePath  string
+	trainingStatusPath string
+	reviews            *reviewStore
+	articleReviews     *articleReviewStore
+	logger             *log.Logger
+	backupVerifyMu     sync.Mutex
+	backupVerifyCache  backupVerificationCache
+	backupHasher       func(string) (string, int64, error)
 }
 
 type backupVerificationCache struct {
@@ -285,14 +286,15 @@ func newHandler(dataPath, reviewPath, allowedOrigin string, logger *log.Logger) 
 
 func newHandlerWithBackup(dataPath, reviewPath, backupStatusPath, allowedOrigin string, logger *log.Logger) http.Handler {
 	service := &api{
-		dataPath:          dataPath,
-		statusPath:        filepath.Join(filepath.Dir(dataPath), "refresh-status.json"),
-		backupStatusPath:  backupStatusPath,
-		qualitySamplePath: filepath.Join(filepath.Dir(dataPath), "quality-review-sample.json"),
-		reviews:           newReviewStore(reviewPath),
-		articleReviews:    newArticleReviewStore(filepath.Join(filepath.Dir(reviewPath), "article-reviews.jsonl")),
-		logger:            logger,
-		backupHasher:      hashBackupArchive,
+		dataPath:           dataPath,
+		statusPath:         filepath.Join(filepath.Dir(dataPath), "refresh-status.json"),
+		backupStatusPath:   backupStatusPath,
+		qualitySamplePath:  filepath.Join(filepath.Dir(dataPath), "quality-review-sample.json"),
+		trainingStatusPath: filepath.Join(filepath.Dir(reviewPath), articleBaselineReportFilename),
+		reviews:            newReviewStore(reviewPath),
+		articleReviews:     newArticleReviewStore(filepath.Join(filepath.Dir(reviewPath), "article-reviews.jsonl")),
+		logger:             logger,
+		backupHasher:       hashBackupArchive,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", service.health)
@@ -306,6 +308,10 @@ func newHandlerWithBackup(dataPath, reviewPath, backupStatusPath, allowedOrigin 
 	mux.HandleFunc("/api/v1/quality/articles", service.qualityArticles)
 	mux.HandleFunc("/api/v1/quality/articles/summary", service.qualityArticleSummary)
 	mux.HandleFunc("/api/v1/quality/articles/export.csv", service.qualityArticleExport)
+	mux.HandleFunc("/api/v1/training/articles", service.trainingArticles)
+	mux.HandleFunc("/api/v1/training/articles/export.csv", service.trainingArticleExport)
+	mux.HandleFunc("/api/v1/training/status", service.trainingStatus)
+	mux.HandleFunc("/api/v1/training/external-datasets", service.externalDatasetAudit)
 	return withSecurityHeaders(withCORS(mux, allowedOrigin))
 }
 

@@ -8,8 +8,13 @@ param(
 $ErrorActionPreference = "Stop"
 
 $RefreshScript = (Resolve-Path (Join-Path $PSScriptRoot "run-refresh.ps1")).Path
-$ActionArguments = "-NoProfile -ExecutionPolicy Bypass -File `"$RefreshScript`""
-$Action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $ActionArguments
+$HiddenLauncher = (Resolve-Path (Join-Path $PSScriptRoot "run-hidden.vbs")).Path
+$WScript = Join-Path $env:SystemRoot "System32\wscript.exe"
+if (-not (Test-Path -LiteralPath $WScript)) {
+    throw "Windows Script Host is missing."
+}
+$ActionArguments = "//B //NoLogo `"$HiddenLauncher`" `"$RefreshScript`""
+$Action = New-ScheduledTaskAction -Execute $WScript -Argument $ActionArguments
 $Trigger = New-ScheduledTaskTrigger `
     -Once `
     -At (Get-Date).AddMinutes(1) `

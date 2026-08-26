@@ -87,20 +87,55 @@ test("server-renders the admin operations and quality page", async () => {
   assert.match(html, /U\.S\. Eastern Time/);
 });
 
+test("server-renders the separate Training Data Lab", async () => {
+  const response = await render("/admin/training-data");
+  assert.equal(response.status, 200);
+  const html = await response.text();
+
+  assert.match(html, /<title>CrisisPulse Training Data — Local lab<\/title>/i);
+  assert.match(html, /Turn careful review into a dataset we can trust/);
+  assert.match(html, /NVIDIA GeForce RTX 4070/);
+  assert.match(html, /Guarded CPU baseline runner installed/);
+  assert.match(html, /No GPU training job is configured yet/);
+  assert.match(html, /Loading the local training dataset/);
+  assert.match(html, /Read-only dataset view/);
+  assert.match(html, /href="\/admin\/training-data"/);
+  assert.match(html, /href="\/admin\/training-data\/dataset-audit"/);
+});
+
+test("server-renders the external Dataset Audit", async () => {
+  const response = await render("/admin/training-data/dataset-audit");
+  assert.equal(response.status, 200);
+  const html = await response.text();
+
+  assert.match(html, /<title>External Dataset Audit — CrisisPulse<\/title>/i);
+  assert.match(html, /Before we train, prove every dataset is safe and useful/);
+  assert.match(html, /What “dataset audit” means in plain English/);
+  assert.match(html, /Checking the external dataset register/);
+  assert.match(html, /No large files are being downloaded/);
+  assert.match(html, /Read-only audit/);
+});
+
 test("server-renders the saved Spanish language without an English first paint", async () => {
   const headers = { cookie: "crisispulse-language=es" };
-  const [dashboardResponse, adminResponse] = await Promise.all([
+  const [dashboardResponse, adminResponse, trainingResponse, auditResponse] = await Promise.all([
     render("/", headers),
     render("/admin", headers),
+    render("/admin/training-data", headers),
+    render("/admin/training-data/dataset-audit", headers),
   ]);
   assert.equal(dashboardResponse.status, 200);
   assert.equal(adminResponse.status, 200);
+  assert.equal(trainingResponse.status, 200);
+  assert.equal(auditResponse.status, 200);
 
-  const [dashboardHTML, adminHTML] = await Promise.all([
+  const [dashboardHTML, adminHTML, trainingHTML, auditHTML] = await Promise.all([
     dashboardResponse.text(),
     adminResponse.text(),
+    trainingResponse.text(),
+    auditResponse.text(),
   ]);
-  for (const html of [dashboardHTML, adminHTML]) {
+  for (const html of [dashboardHTML, adminHTML, trainingHTML, auditHTML]) {
     assert.match(html, /<html[^>]*lang="es"/i);
     assert.match(html, />Idioma</i);
     assert.match(html, /<option[^>]*value="es"[^>]*selected/i);
@@ -116,12 +151,21 @@ test("server-renders the saved Spanish language without an English first paint",
   assert.match(adminHTML, /No relacionado con inundaciones/);
   assert.match(adminHTML, /No se puede determinar/);
   assert.doesNotMatch(adminHTML, /Know what is working before customers do/i);
+  assert.match(trainingHTML, /<title>Datos de entrenamiento de CrisisPulse — Laboratorio local<\/title>/i);
+  assert.match(trainingHTML, /Convierta una revisión cuidadosa en datos confiables/);
+  assert.match(trainingHTML, /Todavía no hay una tarea de entrenamiento con GPU configurada/);
+  assert.doesNotMatch(trainingHTML, /Turn careful review into a dataset we can trust/i);
+  assert.match(auditHTML, /<title>Auditoría de datos externos — CrisisPulse<\/title>/i);
+  assert.match(auditHTML, /Antes de entrenar, demostremos que cada conjunto es seguro y útil/i);
+  assert.doesNotMatch(auditHTML, /Before we train, prove every dataset is safe and useful/i);
 });
 
 test("removes the disposable starter preview", async () => {
-  const [page, adminPage, globalStyles, layout, i18n, i18nServer, i18nShared, packageJson] = await Promise.all([
+  const [page, adminPage, trainingPage, trainingStyles, globalStyles, layout, i18n, i18nServer, i18nShared, packageJson] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/admin/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/admin/training-data/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/admin/training-data/training-data.css", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/i18n.tsx", import.meta.url), "utf8"),
@@ -257,6 +301,7 @@ test("removes the disposable starter preview", async () => {
   assert.match(adminPage, /filter\(\(article\) => !hasDetailedArticleReview\(article\)\)/);
   assert.match(adminPage, /Legacy label — re-label required/);
   assert.match(adminPage, /Training-label counts are temporarily unavailable/);
+  assert.match(adminPage, /href="\/admin\/training-data"/);
   assert.match(adminPage, /qualitySummary === null \? "—"/);
   assert.match(adminPage, /hasLegacyArticleReview/);
   assert.match(adminPage, /aria-describedby=\{`article-label-definition-\$\{option\.value\}`\}/);
@@ -293,6 +338,42 @@ test("removes the disposable starter preview", async () => {
   assert.match(globalStyles, /\.readiness-metrics/);
   assert.match(globalStyles, /\.readiness-blockers/);
   assert.match(globalStyles, /\.readiness-decision\.restarted/);
+  assert.match(trainingPage, /const trainingDatasetURL = "\/api\/v1\/training\/articles"/);
+  assert.match(trainingPage, /const trainingCSVURL = "\/api\/v1\/training\/articles\/export\.csv"/);
+  assert.match(trainingPage, /const adminStatusURL = "\/api\/v1\/admin\/status"/);
+  assert.match(trainingPage, /const trainingStatusURL = "\/api\/v1\/training\/status"/);
+  assert.match(trainingPage, /response\.status === 404/);
+  assert.match(trainingPage, /trainingAttemptRef\.current \? "stale" : "unavailable"/);
+  assert.match(trainingPage, /blocked_non_evaluative_smoke_test/);
+  assert.match(trainingPage, /No model was created/);
+  assert.match(trainingPage, /No se creó ningún modelo/);
+  assert.match(trainingPage, /class_counts_after_text_filter/);
+  assert.match(trainingPage, /story_rows_promoted_to_newer_split/);
+  assert.match(trainingPage, /attemptGatePassed/);
+  assert.match(trainingPage, /const CPU_TOTAL_GATE = 500/);
+  assert.match(trainingPage, /const CPU_CLASS_GATE = 100/);
+  assert.match(trainingPage, /const GPU_TOTAL_GATE = 2_000/);
+  assert.match(trainingPage, /const GPU_CLASS_GATE = 300/);
+  assert.match(trainingPage, /Not computable/);
+  assert.match(trainingPage, /Twenty resolved labels unlock only a preliminary filter measurement/);
+  assert.match(trainingPage, /Cannot determine is retained as an abstention challenge/);
+  assert.match(trainingPage, /source_domain is split and error-analysis metadata/);
+  assert.match(trainingPage, /match_strength, review_bucket, tags, and reviewed_at are not model inputs/);
+  assert.match(trainingPage, /group syndicated stories and normalized publisher families/);
+  assert.match(trainingPage, /CPU gain over the deterministic baseline/);
+  assert.match(trainingPage, /publisher\/story bootstrap CI > 0/);
+  assert.match(trainingPage, /training_eligible/);
+  assert.match(trainingPage, /exclusion_reason/);
+  assert.match(trainingPage, /aria-live="polite"/);
+  assert.match(trainingPage, /<table>/);
+  assert.match(trainingPage, /safeArticleURL/);
+  assert.match(trainingPage, /America\/New_York/);
+  assert.match(trainingStyles, /\.tdl-table-wrap[^}]*overflow-x: auto/s);
+  assert.match(trainingStyles, /\.tdl-attempt-card/);
+  assert.match(trainingStyles, /\.tdl-model-badge\.created/);
+  assert.match(trainingStyles, /\.tdl-attempt-gates li\.passed/);
+  assert.match(trainingStyles, /@media \(max-width: 680px\)/);
+  assert.match(trainingStyles, /@media \(max-width: 390px\)/);
   assert.doesNotMatch(page, /127\.0\.0\.1:8080/);
   assert.match(layout, /CrisisPulse — Flood reporting signals/);
   assert.match(layout, /getRequestLocale/);

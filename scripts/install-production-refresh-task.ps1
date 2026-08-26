@@ -7,14 +7,19 @@ $ErrorActionPreference = "Stop"
 $TaskName = "CrisisPulse Production Refresh"
 $ExpiredSoakTaskName = "CrisisPulse Production Soak Refresh"
 $Runner = Join-Path $PSScriptRoot "run-production-refresh.ps1"
-if (-not (Test-Path -LiteralPath $Runner)) {
-    throw "The production refresh runner is missing."
+$HiddenLauncher = Join-Path $PSScriptRoot "run-hidden.vbs"
+$WScript = Join-Path $env:SystemRoot "System32\wscript.exe"
+if (-not (Test-Path -LiteralPath $Runner) -or -not (Test-Path -LiteralPath $HiddenLauncher)) {
+    throw "The production refresh runner or hidden launcher is missing."
+}
+if (-not (Test-Path -LiteralPath $WScript)) {
+    throw "Windows Script Host is missing."
 }
 
 $StartAt = (Get-Date).AddMinutes(1)
 $Action = New-ScheduledTaskAction `
-    -Execute "powershell.exe" `
-    -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$Runner`""
+    -Execute $WScript `
+    -Argument "//B //NoLogo `"$HiddenLauncher`" `"$Runner`""
 # Leaving RepetitionDuration empty tells Task Scheduler to repeat indefinitely.
 $Trigger = New-ScheduledTaskTrigger `
     -Once `

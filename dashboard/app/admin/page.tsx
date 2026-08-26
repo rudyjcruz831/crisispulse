@@ -12,6 +12,7 @@ const messages = defineMessages({
   primaryNavigation: "Primary navigation",
   dashboard: "Dashboard",
   admin: "Admin",
+  trainingData: "Training data",
   liveOperations: "Live operations",
   checkingOperations: "Checking operations",
   verifiedSnapshot: "Verified snapshot",
@@ -282,6 +283,7 @@ const messages = defineMessages({
   primaryNavigation: "Navegación principal",
   dashboard: "Panel",
   admin: "Administración",
+  trainingData: "Datos de entrenamiento",
   liveOperations: "Operaciones en vivo",
   checkingOperations: "Comprobando operaciones",
   verifiedSnapshot: "Instantánea verificada",
@@ -1272,6 +1274,7 @@ export default function AdminPage() {
         <nav className="header-nav" aria-label={t("primaryNavigation")}>
           <Link href="/">{t("dashboard")}</Link>
           <Link className="active" href="/admin">{t("admin")}</Link>
+          <Link href="/admin/training-data">{t("trainingData")}</Link>
         </nav>
         <div className="header-meta">
           <span className={connection === "ready" ? "live-dot" : "live-dot snapshot"} aria-hidden="true" />
@@ -1286,6 +1289,7 @@ export default function AdminPage() {
         <a href="#operations">{t("operations")}</a>
         <a href="#admin-forecast">{t("forecasts")}</a>
         <a href="#article-quality">{t("quality")}</a>
+        <Link href="/admin/training-data">{t("trainingData")}</Link>
       </nav>
 
       <section className="admin-hero" id="status">
