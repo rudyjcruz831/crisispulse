@@ -68,6 +68,11 @@ def _write_archive(path: Path, rows: list[dict[str, object]]) -> None:
             "source_domain": pl.String,
             "duplicate_group_id": pl.String,
             "publisher_title": pl.String,
+            "location_name": pl.String,
+            "country_code": pl.String,
+            "latitude": pl.Float64,
+            "longitude": pl.Float64,
+            "location_selection_status": pl.String,
         },
         strict=False,
     ).with_columns(pl.col("seen_at").dt.replace_time_zone(None)).write_parquet(path)
@@ -81,16 +86,15 @@ def test_readiness_uses_latest_decision_and_reports_every_exclusion(tmp_path: Pa
     corrected_id = _article_id("corrected")
     legacy_id = _article_id("legacy")
     no_text_id = _article_id("no-text")
-    _write_reviews(
-        reviews_path,
-        [
-            _review(eligible_id, "reported_flooding", now),
-            _review(corrected_id, "reported_flooding", now),
-            _review(corrected_id, "uncertain", now + timedelta(minutes=1)),
-            _review(legacy_id, "relevant", now, schema_version=1),
-            _review(no_text_id, "not_flood_related", now),
-        ],
-    )
+    reviews = [
+        _review(eligible_id, "reported_flooding", now),
+        _review(corrected_id, "reported_flooding", now),
+        _review(corrected_id, "uncertain", now + timedelta(minutes=1)),
+        _review(legacy_id, "relevant", now, schema_version=1),
+        _review(no_text_id, "not_flood_related", now),
+    ]
+    reviews[0]["tags"] = None
+    _write_reviews(reviews_path, reviews)
     _write_archive(
         archive_path,
         [
@@ -131,6 +135,8 @@ def test_readiness_uses_latest_decision_and_reports_every_exclusion(tmp_path: Pa
 
     report, prepared, _split = build_readiness_report(reviews_path, archive_path)
 
+    assert report["report_schema_version"] == 2
+    assert report["latest_reviewed_at"] == (now + timedelta(minutes=1)).isoformat()
     assert report["latest_review_count"] == 4
     assert report["resolved_schema_v2_count"] == 2
     assert report["usable_training_rows"] == 1
@@ -143,6 +149,112 @@ def test_readiness_uses_latest_decision_and_reports_every_exclusion(tmp_path: Pa
     }
     assert report["training_performed"] is False
     assert report["status"] == "not_ready"
+    assert report["geography_summary"]["mappable_rows"] == 0
+
+
+def test_readiness_accepts_archive_without_optional_geography_columns(
+    tmp_path: Path,
+) -> None:
+    reviews_path = tmp_path / "article-reviews.jsonl"
+    archive_path = tmp_path / "articles.parquet"
+    now = datetime(2026, 8, 25, tzinfo=UTC)
+    article_id = _article_id("no-geography-schema")
+    _write_reviews(
+        reviews_path,
+        [_review(article_id, "reported_flooding", now)],
+    )
+    pl.DataFrame(
+        [{
+            "article_id": article_id,
+            "seen_at": now.replace(tzinfo=None),
+            "canonical_url": "https://example.com/river-floods-neighborhood",
+            "source_domain": "example.com",
+            "duplicate_group_id": "story-no-geography",
+            "publisher_title": "",
+        }]
+    ).write_parquet(archive_path)
+
+    report, prepared, _split = build_readiness_report(reviews_path, archive_path)
+
+    assert len(prepared.rows) == 1
+    assert report["geography_summary"] == {
+        "meaning": "article_mentioned_locations_not_verified_events",
+        "source": "gdelt_primary_location_from_permanent_article_archive",
+        "usable_rows": 1,
+        "mappable_rows": 0,
+        "unmappable_rows": 1,
+        "unique_locations": 0,
+        "locations_returned": 0,
+        "truncated": False,
+        "locations": [],
+    }
+
+
+def test_readiness_map_excludes_ambiguous_locations_and_aggregates_classes(
+    tmp_path: Path,
+) -> None:
+    reviews_path = tmp_path / "article-reviews.jsonl"
+    archive_path = tmp_path / "articles.parquet"
+    now = datetime(2026, 8, 25, tzinfo=UTC)
+    trusted_ids = [_article_id("trusted-one"), _article_id("trusted-two")]
+    ambiguous_id = _article_id("ambiguous")
+    _write_reviews(
+        reviews_path,
+        [
+            _review(trusted_ids[0], "reported_flooding", now),
+            _review(trusted_ids[1], "flood_risk_warning", now),
+            _review(ambiguous_id, "heavy_rain_only", now),
+        ],
+    )
+    base = {
+        "seen_at": now,
+        "source_domain": "publisher.example",
+        "publisher_title": None,
+        "location_name": "New Jersey, United States",
+        "country_code": "US",
+        "latitude": 40.0583,
+        "longitude": -74.4057,
+    }
+    _write_archive(
+        archive_path,
+        [
+            {
+                **base,
+                "article_id": trusted_ids[0],
+                "canonical_url": "https://one.example/flooding-in-new-jersey",
+                "source_domain": "one.example",
+                "duplicate_group_id": "story-one",
+                "location_selection_status": "single_region",
+            },
+            {
+                **base,
+                "article_id": trusted_ids[1],
+                "canonical_url": "https://two.example/flood-warning-in-new-jersey",
+                "source_domain": "two.example",
+                "duplicate_group_id": "story-two",
+                "location_selection_status": "dominant_region",
+            },
+            {
+                **base,
+                "article_id": ambiguous_id,
+                "canonical_url": "https://three.example/heavy-rain-in-new-jersey",
+                "source_domain": "three.example",
+                "duplicate_group_id": "story-three",
+                "location_selection_status": "ambiguous_region",
+            },
+        ],
+    )
+
+    report, _prepared, _split = build_readiness_report(reviews_path, archive_path)
+    geography = report["geography_summary"]
+
+    assert geography["usable_rows"] == 3
+    assert geography["mappable_rows"] == 2
+    assert geography["unmappable_rows"] == 1
+    assert geography["unique_locations"] == 1
+    assert geography["locations"][0]["article_count"] == 2
+    assert geography["locations"][0]["class_counts"]["reported_flooding"] == 1
+    assert geography["locations"][0]["class_counts"]["flood_risk_warning"] == 1
 
 
 def test_native_review_loader_rejects_external_or_unknown_schema_fields(tmp_path: Path) -> None:

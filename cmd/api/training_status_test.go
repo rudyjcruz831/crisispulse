@@ -185,6 +185,9 @@ func TestTrainingStatusReturnsSanitizedReadinessReport(t *testing.T) {
 	if result.Status != "not_ready" || result.TrainingPerformed || result.LatestReviewCount != 4 || result.ResolvedSchemaV2Count != 4 || result.UsableTrainingRows != 4 || result.BlockedReason != "readiness_gates_not_met" {
 		t.Fatalf("response = %+v", result)
 	}
+	if result.DatasetFingerprint != "sha256:"+strings.Repeat("0", 64) {
+		t.Fatalf("dataset fingerprint = %q", result.DatasetFingerprint)
+	}
 	if result.Split.Computable || result.Split.Reason != "insufficient_data_for_leakage_safe_split" || len(result.ClassCountsBeforeTextFilter) != 4 || len(result.ClassCountsAfterTextFilter) != 4 || len(result.ProductionReadiness.Gates) != 6 || len(result.SmokeTestReadiness.Gates) != 6 {
 		t.Fatalf("response = %+v", result)
 	}
@@ -208,6 +211,109 @@ func TestTrainingStatusReturnsCompletedSmokeTierAndSplit(t *testing.T) {
 	}
 	if result.Split.ClassCounts["training"]["reported_flooding"] != 2 {
 		t.Fatalf("split class counts = %+v", result.Split.ClassCounts)
+	}
+}
+
+func TestTrainingStatusReturnsOnlyValidatedAggregateGeography(t *testing.T) {
+	handler, path := testTrainingStatusHandler(t)
+	report := baselineReportFixture(true, false)
+	report["report_schema_version"] = 2
+	report["latest_reviewed_at"] = "2026-08-25T11:59:00+00:00"
+	report["geography_summary"] = map[string]any{
+		"meaning":            articleBaselineMapMeaning,
+		"source":             articleBaselineMapSource,
+		"usable_rows":        16,
+		"mappable_rows":      3,
+		"unmappable_rows":    13,
+		"unique_locations":   1,
+		"locations_returned": 1,
+		"truncated":          false,
+		"locations": []any{map[string]any{
+			"location_name": strings.Repeat("é", 240),
+			"country_code":  "US",
+			"latitude":      40.0583,
+			"longitude":     -74.4057,
+			"article_count": 3,
+			"class_counts": map[string]any{
+				"reported_flooding":  2,
+				"flood_risk_warning": 1,
+				"heavy_rain_only":    0,
+				"not_flood_related":  0,
+			},
+		}},
+	}
+	writeBaselineReport(t, path, report)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/training/status", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var result articleBaselineStatusResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.GeographySummary == nil || result.GeographySummary.MappableRows != 3 || len(result.GeographySummary.Locations) != 1 || result.GeographySummary.Locations[0].ArticleCount != 3 {
+		t.Fatalf("geography = %+v", result.GeographySummary)
+	}
+	geographyJSON, err := json.Marshal(result.GeographySummary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, privateField := range []string{"article_id", "source_domain", "reviewed_at", "title", "url"} {
+		if strings.Contains(string(geographyJSON), privateField) {
+			t.Fatalf("geography response exposed %q: %s", privateField, geographyJSON)
+		}
+	}
+}
+
+func TestTrainingStatusRejectsInvalidGeography(t *testing.T) {
+	handler, path := testTrainingStatusHandler(t)
+	report := baselineReportFixture(true, false)
+	report["report_schema_version"] = 2
+	report["latest_reviewed_at"] = "2026-08-25T11:59:00+00:00"
+	report["geography_summary"] = map[string]any{
+		"meaning":            articleBaselineMapMeaning,
+		"source":             articleBaselineMapSource,
+		"usable_rows":        16,
+		"mappable_rows":      1,
+		"unmappable_rows":    15,
+		"unique_locations":   1,
+		"locations_returned": 1,
+		"truncated":          false,
+		"locations": []any{map[string]any{
+			"location_name": "Impossible",
+			"country_code":  "",
+			"latitude":      95.0,
+			"longitude":     0.0,
+			"article_count": 1,
+			"class_counts": map[string]any{
+				"reported_flooding":  1,
+				"flood_risk_warning": 0,
+				"heavy_rain_only":    0,
+				"not_flood_related":  0,
+			},
+		}},
+	}
+	writeBaselineReport(t, path, report)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/training/status", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+}
+
+func TestTrainingStatusRejectsSchemaV2WithoutNewRequiredFields(t *testing.T) {
+	handler, path := testTrainingStatusHandler(t)
+	report := baselineReportFixture(false, false)
+	report["report_schema_version"] = 2
+	writeBaselineReport(t, path, report)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/training/status", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
 	}
 }
 

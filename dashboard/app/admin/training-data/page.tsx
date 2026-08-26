@@ -82,6 +82,49 @@ const messages = defineMessages({
   trainingAttemptEyebrow: "Latest local training attempt",
   trainingAttemptHeading: "See exactly what the local training runner decided.",
   trainingAttemptDescription: "This is the saved result from the local CPU training pipeline, not an estimate based only on label totals.",
+  modelStoryEyebrow: "How the model learns",
+  modelStoryHeading: "From your labels to an honestly tested classifier.",
+  modelStoryDescription: "This is a small, local four-category classifier—not a ChatGPT-style generative model. The diagrams below use current labels and the last saved runner attempt.",
+  modelStatusCollecting: "Current stage: collecting and balancing labels",
+  modelPlainHeading: "What will actually be trained",
+  modelPlainHelp: "CrisisPulse turns trusted headline and URL-path text into word and character patterns, then fits a class-balanced logistic-regression classifier on the CPU. It may abstain when confidence is low. The GPU stays out of the process until a CPU baseline proves useful.",
+  modelFlowAria: "Five stages in the CrisisPulse article-classifier workflow",
+  modelFlowHuman: "Human labels",
+  modelFlowHumanHelp: "You assign one of four article meanings.",
+  modelFlowText: "Safe text",
+  modelFlowTextHelp: "Only headline and URL-path text available during live use are kept.",
+  modelFlowSplit: "Time-safe split",
+  modelFlowSplitHelp: "Older articles train; later stories and publishers validate and test.",
+  modelFlowFit: "CPU classifier",
+  modelFlowFitHelp: "Word and character TF-IDF feed balanced logistic regression.",
+  modelFlowEvaluate: "Honest comparison",
+  modelFlowEvaluateHelp: "Compare with simple rules, protect the final test, and allow abstention.",
+  currentBalanceChartHeading: "Current reviewed label balance",
+  currentBalanceChartHelp: "Live latest-label counts. This deliberately reviewed sample is not real-world flood prevalence.",
+  savedSplitChartHeading: "Last attempt: where each class landed",
+  savedSplitChartHelp: "A usable model needs every class in training, validation, and the untouched final test.",
+  savedSplitUnavailable: "No three-way split is available in the last saved attempt yet.",
+  savedAttemptUnavailable: "No saved attempt is available for this chart yet.",
+  snapshotDifferent: "The saved attempt used {attempt} reviews; the live dataset now has {current}. The attempt charts and map remain labeled as a snapshot.",
+  splitGap: "Missing from one or more train, validation, or final-test periods: {classes}.",
+  noSplitGap: "Every class appears in all three periods.",
+  mapHeading: "Locations mentioned in the last training attempt",
+  mapHelp: "Pins show approximate primary places mentioned in reviewed articles. They are not verified flood events.",
+  mapMapped: "{plotted} plotted of {mapped} safely mappable rows",
+  mapExcluded: "{count} ambiguous, missing, or invalid locations excluded",
+  mapLoading: "Loading public-domain world boundaries…",
+  mapUnavailable: "No trustworthy map locations are available in this saved attempt yet.",
+  mapBoundaryUnavailable: "World boundaries could not be loaded; the coordinate pins remain available in the list.",
+  mapLocationAria: "{location}: {count} reviewed articles; {category}",
+  mapLocationCount: "{count} reviewed articles",
+  mapListHeading: "Mapped locations",
+  mapListShowing: "Showing {shown} of {total} locations",
+  mapTruncated: "The saved report returns its top {returned} of {total} locations; {rows} safely mappable rows are outside this view.",
+  mapLegendHeading: "Pin color",
+  mapMixed: "Mixed classes / tie",
+  mapSelected: "Selected location",
+  mapMeaningNote: "Map source: GDELT primary article location. Only single-region or dominant-region coordinates are plotted; ambiguous coordinates are excluded.",
+  naturalEarthAttribution: "Basemap boundaries: Natural Earth (public domain)",
   attemptChecking: "Checking the latest saved training attempt…",
   attemptMissingHeading: "No local training attempt has been saved yet.",
   attemptMissingHelp: "The guarded runner can create a readiness report without fitting a model or spending API credits.",
@@ -289,6 +332,49 @@ const messages = defineMessages({
   trainingAttemptEyebrow: "Intento local más reciente",
   trainingAttemptHeading: "Vea exactamente qué decidió el motor local de entrenamiento.",
   trainingAttemptDescription: "Este es el resultado guardado del proceso local en CPU, no una estimación basada solo en el total de etiquetas.",
+  modelStoryEyebrow: "Cómo aprende el modelo",
+  modelStoryHeading: "De sus etiquetas a un clasificador evaluado con honestidad.",
+  modelStoryDescription: "Este es un pequeño clasificador local de cuatro categorías, no un modelo generativo como ChatGPT. Los diagramas usan las etiquetas actuales y el último intento guardado.",
+  modelStatusCollecting: "Etapa actual: recopilar y equilibrar etiquetas",
+  modelPlainHeading: "Qué se entrenará realmente",
+  modelPlainHelp: "CrisisPulse convierte el titular confiable y la ruta URL en patrones de palabras y caracteres, y ajusta en la CPU un clasificador de regresión logística equilibrado. Puede abstenerse cuando la confianza sea baja. La GPU queda fuera hasta que una base en CPU demuestre utilidad.",
+  modelFlowAria: "Cinco etapas del clasificador de artículos de CrisisPulse",
+  modelFlowHuman: "Etiquetas humanas",
+  modelFlowHumanHelp: "Usted asigna uno de cuatro significados del artículo.",
+  modelFlowText: "Texto seguro",
+  modelFlowTextHelp: "Solo se conserva el titular y la ruta URL disponibles durante el uso en vivo.",
+  modelFlowSplit: "División temporal segura",
+  modelFlowSplitHelp: "Los artículos anteriores entrenan; historias y editores posteriores validan y prueban.",
+  modelFlowFit: "Clasificador en CPU",
+  modelFlowFitHelp: "TF-IDF de palabras y caracteres alimenta una regresión logística equilibrada.",
+  modelFlowEvaluate: "Comparación honesta",
+  modelFlowEvaluateHelp: "Se compara con reglas simples, se protege la prueba final y se permite abstenerse.",
+  currentBalanceChartHeading: "Equilibrio actual de etiquetas revisadas",
+  currentBalanceChartHelp: "Conteos vigentes en vivo. Esta muestra revisada a propósito no representa la prevalencia real de inundaciones.",
+  savedSplitChartHeading: "Último intento: dónde quedó cada clase",
+  savedSplitChartHelp: "Un modelo utilizable necesita cada clase en entrenamiento, validación y la prueba final intacta.",
+  savedSplitUnavailable: "El último intento guardado todavía no tiene una división en tres partes.",
+  savedAttemptUnavailable: "Todavía no hay un intento guardado para este gráfico.",
+  snapshotDifferent: "El intento guardado usó {attempt} revisiones; el conjunto en vivo ahora tiene {current}. Los gráficos y el mapa del intento siguen identificados como una captura.",
+  splitGap: "Faltan en uno o más periodos de entrenamiento, validación o prueba final: {classes}.",
+  noSplitGap: "Todas las clases aparecen en los tres periodos.",
+  mapHeading: "Lugares mencionados en el último intento de entrenamiento",
+  mapHelp: "Los puntos muestran lugares principales aproximados mencionados en artículos revisados. No son eventos de inundación verificados.",
+  mapMapped: "{plotted} trazadas de {mapped} filas ubicables con seguridad",
+  mapExcluded: "{count} ubicaciones ambiguas, ausentes o inválidas excluidas",
+  mapLoading: "Cargando límites mundiales de dominio público…",
+  mapUnavailable: "Todavía no hay ubicaciones confiables para el mapa en este intento guardado.",
+  mapBoundaryUnavailable: "No se pudieron cargar los límites mundiales; los puntos siguen disponibles en la lista.",
+  mapLocationAria: "{location}: {count} artículos revisados; {category}",
+  mapLocationCount: "{count} artículos revisados",
+  mapListHeading: "Ubicaciones en el mapa",
+  mapListShowing: "Mostrando {shown} de {total} ubicaciones",
+  mapTruncated: "El informe guardado devuelve sus {returned} ubicaciones principales de {total}; {rows} filas ubicables quedan fuera de esta vista.",
+  mapLegendHeading: "Color de los puntos",
+  mapMixed: "Clases mixtas / empate",
+  mapSelected: "Ubicación seleccionada",
+  mapMeaningNote: "Fuente del mapa: ubicación principal del artículo en GDELT. Solo se trazan coordenadas de región única o dominante; las ambiguas se excluyen.",
+  naturalEarthAttribution: "Límites del mapa: Natural Earth (dominio público)",
   attemptChecking: "Comprobando el último intento guardado…",
   attemptMissingHeading: "Todavía no hay un intento local guardado.",
   attemptMissingHelp: "El motor protegido puede crear un informe de preparación sin ajustar un modelo ni gastar créditos de API.",
@@ -447,6 +533,7 @@ type TrainingDataset = {
   schema_version: number;
   summary: {
     total_articles: number;
+    latest_reviewed_at?: string;
     training_eligible: number;
     excluded: number;
     class_counts: Record<ResolvedDecision, number>;
@@ -487,15 +574,39 @@ type TrainingAttemptReadiness = {
   gates: TrainingAttemptGate[];
 };
 
+type TrainingMapLocation = {
+  location_name: string;
+  country_code: string;
+  latitude: number;
+  longitude: number;
+  article_count: number;
+  class_counts: Record<ResolvedDecision, number>;
+};
+
+type TrainingGeographySummary = {
+  meaning: "article_mentioned_locations_not_verified_events";
+  source: "gdelt_primary_location_from_permanent_article_archive";
+  usable_rows: number;
+  mappable_rows: number;
+  unmappable_rows: number;
+  unique_locations: number;
+  locations_returned: number;
+  truncated: boolean;
+  locations: TrainingMapLocation[];
+};
+
 type TrainingAttempt = {
   report_schema_version: number;
+  dataset_fingerprint: string;
   status: TrainingAttemptStatus;
   training_performed: boolean;
   evaluation_tier?: "PRELIMINARY_OFFLINE_BASELINE" | "NON_EVALUATIVE_SMOKE_TEST";
   created_at: string;
   latest_review_count: number;
+  latest_reviewed_at?: string;
   resolved_schema_v2_count: number;
   usable_training_rows: number;
+  geography_summary?: TrainingGeographySummary;
   exclusion_counts: Record<string, number>;
   class_counts_before_text_filter: Record<ResolvedDecision, number>;
   class_counts_after_text_filter: Record<ResolvedDecision, number>;
@@ -550,6 +661,7 @@ const trainingDatasetURL = "/api/v1/training/articles";
 const trainingCSVURL = "/api/v1/training/articles/export.csv";
 const adminStatusURL = "/api/v1/admin/status";
 const trainingStatusURL = "/api/v1/training/status";
+const naturalEarthMapURL = "/data/ne_110m_admin_0_countries.geojson";
 
 const trainingAttemptStatuses = new Set<TrainingAttemptStatus>([
   "not_ready",
@@ -598,6 +710,8 @@ const isTrainingDataset = (value: unknown): value is TrainingDataset => {
   const summary = value.summary;
   return typeof value.schema_version === "number"
     && typeof summary.total_articles === "number"
+    && (summary.latest_reviewed_at === undefined
+      || (typeof summary.latest_reviewed_at === "string" && !Number.isNaN(Date.parse(summary.latest_reviewed_at))))
     && typeof summary.training_eligible === "number"
     && typeof summary.excluded === "number"
     && isRecord(summary.class_counts)
@@ -657,6 +771,50 @@ const isTrainingAttemptReadiness = (value: unknown): value is TrainingAttemptRea
   return new Set(value.gates.map((gate) => gate.name)).size === value.gates.length;
 };
 
+const isTrainingGeographySummary = (value: unknown): value is TrainingGeographySummary => {
+  if (!isRecord(value)
+    || value.meaning !== "article_mentioned_locations_not_verified_events"
+    || value.source !== "gdelt_primary_location_from_permanent_article_archive"
+    || !isNonNegativeInteger(value.usable_rows)
+    || !isNonNegativeInteger(value.mappable_rows)
+    || !isNonNegativeInteger(value.unmappable_rows)
+    || value.mappable_rows + value.unmappable_rows !== value.usable_rows
+    || !isNonNegativeInteger(value.unique_locations)
+    || !isNonNegativeInteger(value.locations_returned)
+    || typeof value.truncated !== "boolean"
+    || !Array.isArray(value.locations)
+    || value.locations_returned !== value.locations.length
+    || value.locations.length > 250
+    || value.unique_locations < value.locations.length) return false;
+  let returnedRows = 0;
+  const locationsAreValid = value.locations.every((location) => {
+    if (!isRecord(location)
+      || typeof location.location_name !== "string"
+      || !location.location_name.trim()
+      || location.location_name !== location.location_name.trim()
+      || typeof location.country_code !== "string"
+      || typeof location.latitude !== "number"
+      || !Number.isFinite(location.latitude)
+      || location.latitude < -90
+      || location.latitude > 90
+      || typeof location.longitude !== "number"
+      || !Number.isFinite(location.longitude)
+      || location.longitude < -180
+      || location.longitude > 180
+      || !isNonNegativeInteger(location.article_count)
+      || location.article_count === 0
+      || !isResolvedClassCounts(location.class_counts)) return false;
+    const classTotal = Object.values(location.class_counts).reduce((total, count) => total + count, 0);
+    if (classTotal !== location.article_count) return false;
+    returnedRows += location.article_count;
+    return true;
+  });
+  if (!locationsAreValid || returnedRows > value.mappable_rows) return false;
+  return value.truncated
+    ? value.unique_locations > value.locations.length
+    : value.unique_locations === value.locations.length && returnedRows === value.mappable_rows;
+};
+
 const isTrainingAttemptSplit = (value: unknown): value is TrainingAttempt["split"] => {
   if (!isRecord(value)
     || typeof value.computable !== "boolean"
@@ -678,7 +836,9 @@ const isTrainingAttemptSplit = (value: unknown): value is TrainingAttempt["split
 
 const isTrainingAttempt = (value: unknown): value is TrainingAttempt => {
   if (!isRecord(value)
-    || value.report_schema_version !== 1
+    || (value.report_schema_version !== 1 && value.report_schema_version !== 2)
+    || typeof value.dataset_fingerprint !== "string"
+    || !/^sha256:[a-f0-9]{64}$/.test(value.dataset_fingerprint)
     || typeof value.status !== "string"
     || !trainingAttemptStatuses.has(value.status as TrainingAttemptStatus)
     || typeof value.training_performed !== "boolean"
@@ -693,6 +853,13 @@ const isTrainingAttempt = (value: unknown): value is TrainingAttempt => {
     || !isTrainingAttemptSplit(value.split)
     || !isTrainingAttemptReadiness(value.production_readiness)
     || !isTrainingAttemptReadiness(value.smoke_test_readiness)) return false;
+  if (value.geography_summary !== undefined && !isTrainingGeographySummary(value.geography_summary)) return false;
+  if (value.latest_reviewed_at !== undefined
+    && (typeof value.latest_reviewed_at !== "string" || Number.isNaN(Date.parse(value.latest_reviewed_at)))) return false;
+  if (value.report_schema_version === 2
+    && (value.latest_reviewed_at === undefined || value.geography_summary === undefined)) return false;
+  if (value.report_schema_version === 1
+    && (value.latest_reviewed_at !== undefined || value.geography_summary !== undefined)) return false;
   if (value.evaluation_tier !== undefined
     && value.evaluation_tier !== "PRELIMINARY_OFFLINE_BASELINE"
     && value.evaluation_tier !== "NON_EVALUATIVE_SMOKE_TEST") return false;
@@ -707,6 +874,7 @@ const isTrainingAttempt = (value: unknown): value is TrainingAttempt => {
     || sumCounts(candidate.class_counts_before_text_filter) !== candidate.resolved_schema_v2_count
     || sumCounts(candidate.class_counts_after_text_filter) !== candidate.usable_training_rows
     || sumCounts(candidate.exclusion_counts) + candidate.usable_training_rows !== candidate.latest_review_count) return false;
+  if (candidate.geography_summary && candidate.geography_summary.usable_rows !== candidate.usable_training_rows) return false;
   if (candidate.split.computable) {
     if (candidate.split.training_rows + candidate.split.validation_rows + candidate.split.test_rows
       + candidate.split.earlier_rows_purged_for_final_publishers !== candidate.usable_training_rows) return false;
@@ -757,8 +925,76 @@ const classMinimumMet = (
 const labelTone = (decision: string) => {
   const resolvedClass = resolvedClasses.find(({ value }) => value === decision);
   if (resolvedClass) return resolvedClass.tone;
+  if (decision === "mixed") return "mixed";
   if (decision === "uncertain") return "uncertain";
   return "legacy";
+};
+
+type WorldMapState = "idle" | "loading" | "ready" | "error";
+
+const projectMapPosition = (longitude: number, latitude: number) => ({
+  x: ((longitude + 180) / 360) * 960,
+  y: ((90 - latitude) / 180) * 480,
+});
+
+const isGeoPosition = (value: unknown): value is [number, number] => (
+  Array.isArray(value)
+  && value.length >= 2
+  && typeof value[0] === "number"
+  && Number.isFinite(value[0])
+  && value[0] >= -180
+  && value[0] <= 180
+  && typeof value[1] === "number"
+  && Number.isFinite(value[1])
+  && value[1] >= -90
+  && value[1] <= 90
+);
+
+const worldRingPath = (value: unknown): string | null => {
+  if (!Array.isArray(value) || value.length < 4 || !value.every(isGeoPosition)) return null;
+  const commands = value.map(([longitude, latitude], index) => {
+    const { x, y } = projectMapPosition(longitude, latitude);
+    return `${index === 0 ? "M" : "L"}${x.toFixed(2)},${y.toFixed(2)}`;
+  });
+  return `${commands.join("")}Z`;
+};
+
+const worldPolygonPath = (value: unknown): string | null => {
+  if (!Array.isArray(value)) return null;
+  const rings = value.map(worldRingPath);
+  return rings.every((ring): ring is string => Boolean(ring)) ? rings.join("") : null;
+};
+
+const worldPathsFromGeoJSON = (value: unknown): string[] | null => {
+  if (!isRecord(value) || value.type !== "FeatureCollection" || !Array.isArray(value.features) || value.features.length > 400) return null;
+  const paths: string[] = [];
+  for (const feature of value.features) {
+    if (!isRecord(feature) || !isRecord(feature.geometry) || typeof feature.geometry.type !== "string") return null;
+    if (feature.geometry.type === "Polygon") {
+      const path = worldPolygonPath(feature.geometry.coordinates);
+      if (!path) return null;
+      paths.push(path);
+      continue;
+    }
+    if (feature.geometry.type === "MultiPolygon" && Array.isArray(feature.geometry.coordinates)) {
+      for (const polygon of feature.geometry.coordinates) {
+        const path = worldPolygonPath(polygon);
+        if (!path) return null;
+        paths.push(path);
+      }
+      continue;
+    }
+    return null;
+  }
+  return paths.length ? paths : null;
+};
+
+type LocationTone = ResolvedDecision | "mixed";
+
+const dominantLocationDecision = (location: TrainingMapLocation): LocationTone => {
+  const maximum = Math.max(...resolvedClasses.map(({ value }) => location.class_counts[value]));
+  const leaders = resolvedClasses.filter(({ value }) => location.class_counts[value] === maximum);
+  return leaders.length === 1 ? leaders[0].value : "mixed";
 };
 
 export default function TrainingDataPage() {
@@ -779,6 +1015,9 @@ export default function TrainingDataPage() {
   const [search, setSearch] = useState("");
   const [labelFilter, setLabelFilter] = useState<LabelFilter>("all");
   const [eligibilityFilter, setEligibilityFilter] = useState<EligibilityFilter>("all");
+  const [worldMapState, setWorldMapState] = useState<WorldMapState>("idle");
+  const [worldPaths, setWorldPaths] = useState<string[]>([]);
+  const [selectedMapLocation, setSelectedMapLocation] = useState<TrainingMapLocation | null>(null);
 
   useEffect(() => {
     document.title = pageMessages.documentTitle;
@@ -856,6 +1095,41 @@ export default function TrainingDataPage() {
       controller.abort();
     };
   }, [loadDataset]);
+
+  useEffect(() => {
+    const hasLocations = Boolean(trainingAttempt?.geography_summary?.locations.length);
+    const controller = new AbortController();
+    const initializeMap = window.setTimeout(() => {
+      setSelectedMapLocation(null);
+      if (!hasLocations) {
+        setWorldMapState("idle");
+        setWorldPaths([]);
+        return;
+      }
+      setWorldMapState("loading");
+      fetch(naturalEarthMapURL, {
+        cache: "force-cache",
+        headers: { Accept: "application/geo+json, application/json" },
+        signal: controller.signal,
+      }).then(async (response) => {
+        if (!response.ok) throw new Error("world boundaries unavailable");
+        const payload: unknown = await response.json();
+        const paths = worldPathsFromGeoJSON(payload);
+        if (!paths) throw new Error("invalid world boundaries");
+        setWorldPaths(paths);
+        setWorldMapState("ready");
+      }).catch(() => {
+        if (!controller.signal.aborted) {
+          setWorldPaths([]);
+          setWorldMapState("error");
+        }
+      });
+    }, 0);
+    return () => {
+      window.clearTimeout(initializeMap);
+      controller.abort();
+    };
+  }, [trainingAttempt?.dataset_fingerprint, trainingAttempt?.geography_summary?.locations.length]);
 
   const formatNumber = useCallback((value: number) => value.toLocaleString(localeTag), [localeTag]);
   const formatBytes = useCallback((value: number | null | undefined) => {
@@ -1074,6 +1348,42 @@ export default function TrainingDataPage() {
     : trainingAttempt?.status.startsWith("ready_for_")
       ? t("attemptReadyHelp")
       : t("attemptWhyStopped");
+  const currentClassMaximum = Math.max(1, ...resolvedClasses.map(({ value }) => classCounts[value]));
+  const splitPeriods = [
+    { value: "training", label: t("attemptTrainingRows") },
+    { value: "validation", label: t("attemptValidationRows") },
+    { value: "test", label: t("attemptTestRows") },
+  ] as const;
+  const splitClassMaximum = trainingAttempt?.split.computable
+    ? Math.max(1, ...splitPeriods.flatMap(({ value }) => (
+        resolvedClasses.map((classDefinition) => trainingAttempt.split.class_counts[value][classDefinition.value])
+      )))
+    : 1;
+  const splitGapLabels = trainingAttempt?.split.computable
+    ? resolvedClasses
+        .filter(({ value }) => (
+          trainingAttempt.split.class_counts.training[value] === 0
+          || trainingAttempt.split.class_counts.validation[value] === 0
+          || trainingAttempt.split.class_counts.test[value] === 0
+        ))
+        .map(({ labelKey }) => t(labelKey))
+    : [];
+  const attemptSnapshotDiffers = Boolean(
+    trainingAttempt && summary && (
+      trainingAttempt.latest_review_count !== summary.total_articles
+      || trainingAttempt.resolved_schema_v2_count !== summary.training_eligible
+      || (trainingAttempt.latest_reviewed_at !== undefined
+        && summary.latest_reviewed_at !== undefined
+        && Date.parse(trainingAttempt.latest_reviewed_at) !== Date.parse(summary.latest_reviewed_at))
+      || resolvedClasses.some(({ value }) => (
+        trainingAttempt.class_counts_before_text_filter[value] !== summary.class_counts[value]
+      ))
+    ),
+  );
+  const mapGeography = trainingAttempt?.geography_summary;
+  const mapLocations = mapGeography?.locations ?? [];
+  const returnedMappedRows = mapLocations.reduce((total, location) => total + location.article_count, 0);
+  const listedMapLocations = mapLocations.slice(0, 12);
 
   const clearFilters = () => {
     setSearch("");
@@ -1273,6 +1583,230 @@ export default function TrainingDataPage() {
                 ) : null}
               </article>
             ) : null}
+          </section>
+
+          <section className="tdl-section tdl-model-story" aria-labelledby="model-story-heading">
+            <div className="tdl-section-heading">
+              <div>
+                <p className="eyebrow">{t("modelStoryEyebrow")}</p>
+                <h2 id="model-story-heading">{t("modelStoryHeading")}</h2>
+                <p>{t("modelStoryDescription")}</p>
+              </div>
+              <strong className={`tdl-model-stage ${trainingAttempt?.training_performed ? "complete" : "collecting"}`}>
+                <i aria-hidden="true" />
+                {trainingAttempt?.training_performed ? t("modelCreated") : t("modelStatusCollecting")}
+              </strong>
+            </div>
+
+            <article className="tdl-model-explainer">
+              <div>
+                <h3>{t("modelPlainHeading")}</h3>
+                <p>{t("modelPlainHelp")}</p>
+              </div>
+              <ol aria-label={t("modelFlowAria")}>
+                {[
+                  ["modelFlowHuman", "modelFlowHumanHelp"],
+                  ["modelFlowText", "modelFlowTextHelp"],
+                  ["modelFlowSplit", "modelFlowSplitHelp"],
+                  ["modelFlowFit", "modelFlowFitHelp"],
+                  ["modelFlowEvaluate", "modelFlowEvaluateHelp"],
+                ].map(([heading, help], index) => (
+                  <li className={index === 0 && !trainingAttempt?.training_performed ? "current" : ""} key={heading}>
+                    <span>{String(index + 1).padStart(2, "0")}</span>
+                    <strong>{t(heading as MessageKey)}</strong>
+                    <small>{t(help as MessageKey)}</small>
+                  </li>
+                ))}
+              </ol>
+            </article>
+
+            {attemptSnapshotDiffers && trainingAttempt ? (
+              <p className="tdl-snapshot-notice" role="status">
+                <span aria-hidden="true">i</span>
+                {t("snapshotDifferent", {
+                  attempt: formatNumber(trainingAttempt.latest_review_count),
+                  current: formatNumber(summary?.total_articles ?? 0),
+                })}
+              </p>
+            ) : null}
+
+            <div className="tdl-visual-grid">
+              <article className="tdl-visual-card" aria-labelledby="current-balance-chart-heading">
+                <header>
+                  <div>
+                    <p className="eyebrow">{t("latestReviews")}</p>
+                    <h3 id="current-balance-chart-heading">{t("currentBalanceChartHeading")}</h3>
+                  </div>
+                  <strong>{formatNumber(summary?.training_eligible ?? 0)}</strong>
+                </header>
+                <p>{t("currentBalanceChartHelp")}</p>
+                <ul className="tdl-balance-chart">
+                  {resolvedClasses.map(({ value, labelKey, tone }) => (
+                    <li className={tone} key={value}>
+                      <span>{t(labelKey)}</span>
+                      <i aria-hidden="true"><b style={{ width: `${(classCounts[value] / currentClassMaximum) * 100}%` }} /></i>
+                      <strong>{formatNumber(classCounts[value])}</strong>
+                    </li>
+                  ))}
+                </ul>
+              </article>
+
+              <article className="tdl-visual-card" aria-labelledby="attempt-split-chart-heading">
+                <header>
+                  <div>
+                    <p className="eyebrow">{t("attemptSaved", { time: trainingAttempt ? formatEastern(trainingAttempt.created_at) : "—" })}</p>
+                    <h3 id="attempt-split-chart-heading">{t("savedSplitChartHeading")}</h3>
+                  </div>
+                </header>
+                <p>{t("savedSplitChartHelp")}</p>
+                {trainingAttempt?.split.computable ? (
+                  <>
+                    <div className="tdl-split-chart">
+                      {resolvedClasses.map(({ value, labelKey, tone }) => (
+                        <div className={`tdl-split-chart-row ${tone}`} key={value}>
+                          <strong>{t(labelKey)}</strong>
+                          {splitPeriods.map((period) => {
+                            const count = trainingAttempt.split.class_counts[period.value][value];
+                            return (
+                              <div key={period.value}>
+                                <small>{period.label}</small>
+                                <i aria-hidden="true"><b style={{ width: `${(count / splitClassMaximum) * 100}%` }} /></i>
+                                <span>{formatNumber(count)}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ))}
+                    </div>
+                    <p className={`tdl-split-gap ${splitGapLabels.length ? "warning" : "complete"}`}>
+                      {splitGapLabels.length
+                        ? t("splitGap", { classes: splitGapLabels.join(", ") })
+                        : t("noSplitGap")}
+                    </p>
+                  </>
+                ) : (
+                  <p className="tdl-chart-empty">{trainingAttempt ? t("savedSplitUnavailable") : t("savedAttemptUnavailable")}</p>
+                )}
+              </article>
+            </div>
+
+            <article className="tdl-map-card" aria-labelledby="training-map-heading">
+              <header>
+                <div>
+                  <p className="eyebrow">{t("modelStoryEyebrow")}</p>
+                  <h3 id="training-map-heading">{t("mapHeading")}</h3>
+                  <p>{t("mapHelp")}</p>
+                </div>
+                {mapGeography ? (
+                  <dl>
+                    <div><dt>{t("mapMapped", { plotted: formatNumber(returnedMappedRows), mapped: formatNumber(mapGeography.mappable_rows) })}</dt><dd>{formatNumber(returnedMappedRows)}</dd></div>
+                    <div><dt>{t("mapExcluded", { count: formatNumber(mapGeography.unmappable_rows) })}</dt><dd>{formatNumber(mapGeography.unmappable_rows)}</dd></div>
+                  </dl>
+                ) : null}
+              </header>
+
+              {mapLocations.length ? (
+                <>
+                  <div className="tdl-map-layout">
+                    <div>
+                      <div className="tdl-world-map">
+                        <svg aria-hidden="true" preserveAspectRatio="xMidYMid meet" viewBox="0 0 960 480">
+                          <g className="tdl-map-graticule">
+                            {[-120, -60, 0, 60, 120].map((longitude) => {
+                              const { x } = projectMapPosition(longitude, 0);
+                              return <line key={`longitude-${longitude}`} x1={x} x2={x} y1="0" y2="480" />;
+                            })}
+                            {[-60, -30, 0, 30, 60].map((latitude) => {
+                              const { y } = projectMapPosition(0, latitude);
+                              return <line key={`latitude-${latitude}`} x1="0" x2="960" y1={y} y2={y} />;
+                            })}
+                          </g>
+                          <g className="tdl-map-countries">
+                            {worldPaths.map((path, index) => <path d={path} key={index} />)}
+                          </g>
+                        </svg>
+                        <div className="tdl-map-pins">
+                          {mapLocations.map((location) => {
+                            const { x, y } = projectMapPosition(location.longitude, location.latitude);
+                            const dominantDecision = dominantLocationDecision(location);
+                            const tone = labelTone(dominantDecision);
+                            const category = dominantDecision === "mixed"
+                              ? t("mapMixed")
+                              : t(resolvedClasses.find(({ value }) => value === dominantDecision)?.labelKey ?? "mapMixed");
+                            const selected = selectedMapLocation === location;
+                            return (
+                              <button
+                                aria-label={t("mapLocationAria", { location: location.location_name, count: formatNumber(location.article_count), category })}
+                                aria-pressed={selected}
+                                className={`${tone} ${selected ? "selected" : ""}`}
+                                key={`${location.location_name}-${location.latitude}-${location.longitude}`}
+                                onClick={() => setSelectedMapLocation(location)}
+                                style={{ left: `${(x / 960) * 100}%`, top: `${(y / 480) * 100}%` }}
+                                title={`${location.location_name} — ${formatNumber(location.article_count)} — ${category}`}
+                                type="button"
+                              ><span>{formatNumber(location.article_count)}</span></button>
+                            );
+                          })}
+                        </div>
+                        {worldMapState === "loading" ? <p className="tdl-map-state" role="status">{t("mapLoading")}</p> : null}
+                        {worldMapState === "error" ? <p className="tdl-map-state warning" role="status">{t("mapBoundaryUnavailable")}</p> : null}
+                      </div>
+                      <ul className="tdl-map-legend" aria-label={t("mapLegendHeading")}>
+                        {resolvedClasses.map(({ value, labelKey, tone }) => (
+                          <li className={tone} key={value}><i aria-hidden="true" />{t(labelKey)}</li>
+                        ))}
+                        <li className="mixed"><i aria-hidden="true" />{t("mapMixed")}</li>
+                      </ul>
+                      <p className="tdl-map-note">{t("mapMeaningNote")}</p>
+                      {mapGeography?.truncated ? (
+                        <p className="tdl-map-note warning">
+                          {t("mapTruncated", {
+                            returned: formatNumber(mapGeography.locations_returned),
+                            total: formatNumber(mapGeography.unique_locations),
+                            rows: formatNumber(Math.max(0, mapGeography.mappable_rows - returnedMappedRows)),
+                          })}
+                        </p>
+                      ) : null}
+                      <a className="tdl-map-source" href="https://www.naturalearthdata.com/downloads/110m-cultural-vectors/110m-admin-0-countries/" rel="noreferrer" target="_blank">{t("naturalEarthAttribution")} ↗</a>
+                    </div>
+
+                    <aside className="tdl-map-locations" aria-labelledby="mapped-location-list-heading">
+                      <div>
+                        <h4 id="mapped-location-list-heading">{t("mapListHeading")}</h4>
+                        <span>{t("mapListShowing", { shown: formatNumber(listedMapLocations.length), total: formatNumber(mapGeography?.unique_locations ?? mapLocations.length) })}</span>
+                      </div>
+                      {selectedMapLocation ? (
+                        <section className="tdl-map-selection" aria-live="polite">
+                          <small>{t("mapSelected")}</small>
+                          <strong>{selectedMapLocation.location_name}</strong>
+                          <span>{t("mapLocationCount", { count: formatNumber(selectedMapLocation.article_count) })}</span>
+                          <ul>
+                            {resolvedClasses
+                              .filter(({ value }) => selectedMapLocation.class_counts[value] > 0)
+                              .map(({ value, labelKey, tone }) => (
+                                <li className={tone} key={value}><i aria-hidden="true" />{t(labelKey)} <b>{formatNumber(selectedMapLocation.class_counts[value])}</b></li>
+                              ))}
+                          </ul>
+                        </section>
+                      ) : null}
+                      <ol>
+                        {listedMapLocations.map((location) => (
+                          <li key={`${location.location_name}-${location.latitude}-${location.longitude}`}>
+                            <button onClick={() => setSelectedMapLocation(location)} type="button">
+                              <span>{location.location_name}</span>
+                              <small>{location.country_code || `${location.latitude.toFixed(1)}, ${location.longitude.toFixed(1)}`}</small>
+                              <strong>{formatNumber(location.article_count)}</strong>
+                            </button>
+                          </li>
+                        ))}
+                      </ol>
+                    </aside>
+                  </div>
+                </>
+              ) : (
+                <p className="tdl-map-empty">{t("mapUnavailable")}</p>
+              )}
+            </article>
           </section>
 
           <section className="tdl-section" aria-labelledby="readiness-heading">

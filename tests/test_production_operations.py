@@ -320,6 +320,24 @@ def test_backup_accepts_mixed_legacy_and_detailed_article_labels(
     assert len(list(backups.glob("crisispulse-*.tar.gz"))) == 1
 
 
+def test_backup_accepts_null_as_an_empty_v2_article_tag_list(
+    tmp_path: Path,
+) -> None:
+    state, work, backups = _source_tree(tmp_path)
+    review_path = state / "article-reviews.jsonl"
+    record = json.loads(review_path.read_text(encoding="utf-8"))
+    record["decision_schema_version"] = 2
+    record["decision"] = "heavy_rain_only"
+    record["tags"] = None
+    review_path.write_text(json.dumps(record) + "\n", encoding="utf-8")
+    script = _normalized_script(BACKUP_SCRIPT, tmp_path / "backup.sh")
+
+    result = _run_alpine(script, state, work, backups)
+
+    assert result.returncode == 0, result.stderr
+    assert len(list(backups.glob("crisispulse-*.tar.gz"))) == 1
+
+
 def test_backup_rejects_article_label_from_the_wrong_schema_version(
     tmp_path: Path,
 ) -> None:

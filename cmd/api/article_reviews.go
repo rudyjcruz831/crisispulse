@@ -114,6 +114,7 @@ type trainingArticle struct {
 
 type trainingArticleSummary struct {
 	TotalArticles         int            `json:"total_articles"`
+	LatestReviewedAt      string         `json:"latest_reviewed_at,omitempty"`
 	TrainingEligible      int            `json:"training_eligible"`
 	Excluded              int            `json:"excluded"`
 	ClassCounts           map[string]int `json:"class_counts"`
@@ -316,6 +317,12 @@ func buildTrainingArticlesResponse(reviews []articleReviewRecord) trainingArticl
 		Articles: make([]trainingArticle, 0, len(reviews)),
 	}
 	for _, review := range reviews {
+		if reviewedAt, err := time.Parse(time.RFC3339Nano, review.ReviewedAt); err == nil {
+			latestAt, latestErr := time.Parse(time.RFC3339Nano, response.Summary.LatestReviewedAt)
+			if latestErr != nil || reviewedAt.After(latestAt) {
+				response.Summary.LatestReviewedAt = reviewedAt.Format(time.RFC3339Nano)
+			}
+		}
 		eligible, reason := articleTrainingEligibility(review)
 		response.Articles = append(response.Articles, trainingArticle{
 			articleReviewRecord: review,

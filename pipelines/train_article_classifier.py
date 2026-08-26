@@ -40,10 +40,11 @@ from pipelines.publisher_titles import normalize_publisher_title
 
 
 DATASET_CONTRACT = "crisispulse_native_article_reviews_v2"
-REPORT_SCHEMA_VERSION = 1
+REPORT_SCHEMA_VERSION = 2
 ARTICLE_ID_PATTERN = re.compile(r"^[a-f0-9]{64}$")
 MAX_REVIEW_LOG_BYTES = 4 << 20
 MAX_REVIEW_LINE_BYTES = 64 << 10
+MAX_GEOGRAPHY_LOCATIONS = 250
 CLASS_LABELS = (
     "reported_flooding",
     "flood_risk_warning",
@@ -82,6 +83,14 @@ PUBLISHER_TITLE_SOURCE_COLUMNS = (
     "title_source",
 )
 PUBLISHER_METADATA_SOURCES = {"publisher_metadata"}
+OPTIONAL_GEOGRAPHY_COLUMNS = {
+    "location_name",
+    "country_code",
+    "latitude",
+    "longitude",
+    "location_selection_status",
+}
+TRUSTED_LOCATION_SELECTION_STATUSES = {"single_region", "dominant_region"}
 
 PRODUCTION_MINIMUMS = {
     "total_rows": 500,
@@ -115,12 +124,18 @@ class ArticleRow:
     publisher_group: str
     story_group: str
     language: str
+    location_name: str = ""
+    country_code: str = ""
+    latitude: float | None = None
+    longitude: float | None = None
+    location_selection_status: str = "missing"
 
 
 @dataclass
 class PreparedArticles:
     rows: list[ArticleRow]
     latest_review_count: int
+    latest_reviewed_at: str
     resolved_v2_count: int
     exclusion_counts: dict[str, int]
     label_counts_before_text_filter: dict[str, int]
@@ -179,6 +194,8 @@ def _validate_review(record: Any, line_number: int) -> dict[str, Any]:
     if schema_version == 2 and decision not in V2_LABELS:
         raise ValueError(f"article review line {line_number} has an invalid schema-v2 decision")
     tags = record.get("tags", [])
+    if tags is None:
+        tags = []
     if not isinstance(tags, list) or any(not isinstance(tag, str) for tag in tags):
         raise ValueError(f"article review line {line_number} has invalid tags")
     if schema_version in {0, 1} and tags:
@@ -257,6 +274,47 @@ def _archive_text(row: dict[str, Any], title_source_column: str | None) -> tuple
     return None, "unavailable"
 
 
+def _archive_location(row: dict[str, Any]) -> tuple[str, str, float | None, float | None, str]:
+    """Return a validated article-mentioned location without inventing precision."""
+    location_name = row.get("location_name")
+    if not isinstance(location_name, str):
+        location_name = ""
+    location_name = " ".join(location_name.strip().split())[:240]
+
+    country_code = row.get("country_code")
+    if not isinstance(country_code, str):
+        country_code = ""
+    country_code = country_code.strip().upper()[:8]
+
+    selection_status = row.get("location_selection_status")
+    if not isinstance(selection_status, str):
+        selection_status = "missing"
+    selection_status = selection_status.strip().casefold()
+
+    latitude = row.get("latitude")
+    longitude = row.get("longitude")
+    if isinstance(latitude, bool) or not isinstance(latitude, (int, float)):
+        latitude = None
+    if isinstance(longitude, bool) or not isinstance(longitude, (int, float)):
+        longitude = None
+    if latitude is not None:
+        latitude = float(latitude)
+    if longitude is not None:
+        longitude = float(longitude)
+    if (
+        latitude is None
+        or longitude is None
+        or not math.isfinite(latitude)
+        or not math.isfinite(longitude)
+        or not -90 <= latitude <= 90
+        or not -180 <= longitude <= 180
+    ):
+        latitude = None
+        longitude = None
+
+    return location_name, country_code, latitude, longitude, selection_status
+
+
 def prepare_native_articles(review_path: Path, archive_path: Path) -> PreparedArticles:
     reviews = load_latest_native_reviews(review_path)
     schema = pl.read_parquet_schema(archive_path)
@@ -271,6 +329,7 @@ def prepare_native_articles(review_path: Path, archive_path: Path) -> PreparedAr
         REQUIRED_ARCHIVE_COLUMNS
         | ({title_source_column} if title_source_column else set())
         | ({"language"} if "language" in schema else set())
+        | OPTIONAL_GEOGRAPHY_COLUMNS.intersection(schema)
     )
     archive = pl.read_parquet(archive_path, columns=selected_columns)
     if archive["article_id"].n_unique() != archive.height:
@@ -324,6 +383,9 @@ def prepare_native_articles(review_path: Path, archive_path: Path) -> PreparedAr
         language = archived.get("language", "unknown")
         if not isinstance(language, str) or not language.strip():
             language = "unknown"
+        location_name, country_code, latitude, longitude, selection_status = (
+            _archive_location(archived)
+        )
         rows.append(
             ArticleRow(
                 article_id=str(review["article_id"]),
@@ -334,12 +396,25 @@ def prepare_native_articles(review_path: Path, archive_path: Path) -> PreparedAr
                 publisher_group=publisher_group,
                 story_group=story_group.strip(),
                 language=language.strip().casefold(),
+                location_name=location_name,
+                country_code=country_code,
+                latitude=latitude,
+                longitude=longitude,
+                location_selection_status=selection_status,
             )
         )
 
     return PreparedArticles(
         rows=sorted(rows, key=lambda row: (row.seen_at, row.article_id)),
         latest_review_count=len(reviews),
+        latest_reviewed_at=(
+            max(
+                _parse_timestamp(review["reviewed_at"], field="reviewed_at")
+                for review in reviews
+            ).isoformat()
+            if reviews
+            else ""
+        ),
         resolved_v2_count=resolved_v2_count,
         exclusion_counts=dict(sorted(exclusions.items())),
         label_counts_before_text_filter={
@@ -519,6 +594,67 @@ def _dataset_fingerprint(rows: Iterable[ArticleRow]) -> str:
         digest.update(json.dumps(value, sort_keys=True, ensure_ascii=False).encode("utf-8"))
         digest.update(b"\n")
     return f"sha256:{digest.hexdigest()}"
+
+
+def _geography_summary(rows: Iterable[ArticleRow]) -> dict[str, Any]:
+    """Aggregate safe map points for the training report.
+
+    Coordinates describe the primary place mentioned by the GDELT article row;
+    they are not verified physical flood events. Ambiguous and invalid locations
+    are counted but never plotted.
+    """
+    materialized = list(rows)
+    grouped: dict[tuple[str, str, float, float], Counter[str]] = {}
+    for row in materialized:
+        if (
+            row.location_selection_status not in TRUSTED_LOCATION_SELECTION_STATUSES
+            or not row.location_name
+            or row.latitude is None
+            or row.longitude is None
+        ):
+            continue
+        key = (
+            row.location_name,
+            row.country_code,
+            round(row.latitude, 5),
+            round(row.longitude, 5),
+        )
+        grouped.setdefault(key, Counter())[row.label] += 1
+
+    locations = [
+        {
+            "location_name": location_name,
+            "country_code": country_code,
+            "latitude": latitude,
+            "longitude": longitude,
+            "article_count": sum(class_counts.values()),
+            "class_counts": {
+                label: class_counts[label] for label in CLASS_LABELS
+            },
+        }
+        for (location_name, country_code, latitude, longitude), class_counts in grouped.items()
+    ]
+    locations.sort(
+        key=lambda location: (
+            -location["article_count"],
+            location["location_name"].casefold(),
+            location["latitude"],
+            location["longitude"],
+        )
+    )
+    mappable_rows = sum(location["article_count"] for location in locations)
+    returned_locations = locations[:MAX_GEOGRAPHY_LOCATIONS]
+    return {
+        "meaning": "article_mentioned_locations_not_verified_events",
+        "source": "gdelt_primary_location_from_permanent_article_archive",
+        "usable_rows": len(materialized),
+        "mappable_rows": mappable_rows,
+        "unmappable_rows": len(materialized) - mappable_rows,
+        "unique_locations": len(locations),
+        "locations_returned": len(returned_locations),
+        "truncated": len(locations) > len(returned_locations),
+        "locations": returned_locations,
+    }
 
 
 def _metrics(labels: list[str], predictions: list[str]) -> dict[str, Any]:
@@ -768,8 +904,10 @@ def build_readiness_report(
         ),
         "training_performed": False,
         "latest_review_count": prepared.latest_review_count,
+        "latest_reviewed_at": prepared.latest_reviewed_at,
         "resolved_schema_v2_count": prepared.resolved_v2_count,
         "usable_training_rows": len(prepared.rows),
+        "geography_summary": _geography_summary(prepared.rows),
         "label_counts_before_text_filter": prepared.label_counts_before_text_filter,
         "exclusion_counts": prepared.exclusion_counts,
         "safeguards": prepared.safeguards,

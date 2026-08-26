@@ -12,13 +12,18 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const (
-	articleBaselineReportFilename      = "article-baseline-report.json"
-	articleBaselineReportSchemaVersion = 1
-	articleBaselineDatasetContract     = "crisispulse_native_article_reviews_v2"
-	maxArticleBaselineReportBytes      = 512 << 10
+	articleBaselineReportFilename       = "article-baseline-report.json"
+	articleBaselineReportSchemaVersion  = 2
+	articleBaselineMinimumSchemaVersion = 1
+	articleBaselineDatasetContract      = "crisispulse_native_article_reviews_v2"
+	maxArticleBaselineReportBytes       = 512 << 10
+	maxArticleBaselineMapLocations      = 250
+	articleBaselineMapMeaning           = "article_mentioned_locations_not_verified_events"
+	articleBaselineMapSource            = "gdelt_primary_location_from_permanent_article_archive"
 )
 
 var articleBaselineClassLabels = []string{
@@ -69,29 +74,52 @@ type articleBaselineSplitFile struct {
 	TestRows                            int    `json:"test_rows,omitempty"`
 }
 
+type articleBaselineMapLocation struct {
+	LocationName string         `json:"location_name"`
+	CountryCode  string         `json:"country_code"`
+	Latitude     float64        `json:"latitude"`
+	Longitude    float64        `json:"longitude"`
+	ArticleCount int            `json:"article_count"`
+	ClassCounts  map[string]int `json:"class_counts"`
+}
+
+type articleBaselineGeographySummary struct {
+	Meaning           string                       `json:"meaning"`
+	Source            string                       `json:"source"`
+	UsableRows        int                          `json:"usable_rows"`
+	MappableRows      int                          `json:"mappable_rows"`
+	UnmappableRows    int                          `json:"unmappable_rows"`
+	UniqueLocations   int                          `json:"unique_locations"`
+	LocationsReturned int                          `json:"locations_returned"`
+	Truncated         bool                         `json:"truncated"`
+	Locations         []articleBaselineMapLocation `json:"locations"`
+}
+
 type articleBaselineReportFile struct {
-	ReportSchemaVersion         int                          `json:"report_schema_version"`
-	DatasetContract             string                       `json:"dataset_contract"`
-	DatasetFingerprint          string                       `json:"dataset_fingerprint"`
-	CreatedAt                   string                       `json:"created_at"`
-	Inputs                      json.RawMessage              `json:"inputs"`
-	Status                      string                       `json:"status"`
-	TrainingPerformed           bool                         `json:"training_performed"`
-	EvaluationTier              string                       `json:"evaluation_tier,omitempty"`
-	LatestReviewCount           int                          `json:"latest_review_count"`
-	ResolvedSchemaV2Count       int                          `json:"resolved_schema_v2_count"`
-	UsableTrainingRows          int                          `json:"usable_training_rows"`
-	LabelCountsBeforeTextFilter map[string]int               `json:"label_counts_before_text_filter"`
-	ExclusionCounts             map[string]int               `json:"exclusion_counts"`
-	Safeguards                  json.RawMessage              `json:"safeguards"`
-	Split                       articleBaselineSplitFile     `json:"split"`
-	ProductionReadiness         articleBaselineReadinessFile `json:"production_readiness"`
-	SmokeTestReadiness          articleBaselineReadinessFile `json:"smoke_test_readiness"`
-	Interpretation              json.RawMessage              `json:"interpretation"`
-	BlockedReason               string                       `json:"blocked_reason,omitempty"`
-	Metrics                     json.RawMessage              `json:"metrics,omitempty"`
-	RawPredictions              string                       `json:"raw_predictions,omitempty"`
-	Runtime                     json.RawMessage              `json:"runtime,omitempty"`
+	ReportSchemaVersion         int                              `json:"report_schema_version"`
+	DatasetContract             string                           `json:"dataset_contract"`
+	DatasetFingerprint          string                           `json:"dataset_fingerprint"`
+	CreatedAt                   string                           `json:"created_at"`
+	Inputs                      json.RawMessage                  `json:"inputs"`
+	Status                      string                           `json:"status"`
+	TrainingPerformed           bool                             `json:"training_performed"`
+	EvaluationTier              string                           `json:"evaluation_tier,omitempty"`
+	LatestReviewCount           int                              `json:"latest_review_count"`
+	LatestReviewedAt            string                           `json:"latest_reviewed_at,omitempty"`
+	ResolvedSchemaV2Count       int                              `json:"resolved_schema_v2_count"`
+	UsableTrainingRows          int                              `json:"usable_training_rows"`
+	GeographySummary            *articleBaselineGeographySummary `json:"geography_summary,omitempty"`
+	LabelCountsBeforeTextFilter map[string]int                   `json:"label_counts_before_text_filter"`
+	ExclusionCounts             map[string]int                   `json:"exclusion_counts"`
+	Safeguards                  json.RawMessage                  `json:"safeguards"`
+	Split                       articleBaselineSplitFile         `json:"split"`
+	ProductionReadiness         articleBaselineReadinessFile     `json:"production_readiness"`
+	SmokeTestReadiness          articleBaselineReadinessFile     `json:"smoke_test_readiness"`
+	Interpretation              json.RawMessage                  `json:"interpretation"`
+	BlockedReason               string                           `json:"blocked_reason,omitempty"`
+	Metrics                     json.RawMessage                  `json:"metrics,omitempty"`
+	RawPredictions              string                           `json:"raw_predictions,omitempty"`
+	Runtime                     json.RawMessage                  `json:"runtime,omitempty"`
 }
 
 type articleBaselineSplitSummary struct {
@@ -117,21 +145,24 @@ type articleBaselineReadinessSummary struct {
 }
 
 type articleBaselineStatusResponse struct {
-	ReportSchemaVersion         int                             `json:"report_schema_version"`
-	Status                      string                          `json:"status"`
-	TrainingPerformed           bool                            `json:"training_performed"`
-	EvaluationTier              string                          `json:"evaluation_tier,omitempty"`
-	CreatedAt                   string                          `json:"created_at"`
-	LatestReviewCount           int                             `json:"latest_review_count"`
-	ResolvedSchemaV2Count       int                             `json:"resolved_schema_v2_count"`
-	UsableTrainingRows          int                             `json:"usable_training_rows"`
-	ExclusionCounts             map[string]int                  `json:"exclusion_counts"`
-	ClassCountsBeforeTextFilter map[string]int                  `json:"class_counts_before_text_filter"`
-	ClassCountsAfterTextFilter  map[string]int                  `json:"class_counts_after_text_filter"`
-	Split                       articleBaselineSplitSummary     `json:"split"`
-	ProductionReadiness         articleBaselineReadinessSummary `json:"production_readiness"`
-	SmokeTestReadiness          articleBaselineReadinessSummary `json:"smoke_test_readiness"`
-	BlockedReason               string                          `json:"blocked_reason,omitempty"`
+	ReportSchemaVersion         int                              `json:"report_schema_version"`
+	Status                      string                           `json:"status"`
+	TrainingPerformed           bool                             `json:"training_performed"`
+	EvaluationTier              string                           `json:"evaluation_tier,omitempty"`
+	CreatedAt                   string                           `json:"created_at"`
+	LatestReviewCount           int                              `json:"latest_review_count"`
+	LatestReviewedAt            string                           `json:"latest_reviewed_at,omitempty"`
+	DatasetFingerprint          string                           `json:"dataset_fingerprint"`
+	ResolvedSchemaV2Count       int                              `json:"resolved_schema_v2_count"`
+	UsableTrainingRows          int                              `json:"usable_training_rows"`
+	GeographySummary            *articleBaselineGeographySummary `json:"geography_summary,omitempty"`
+	ExclusionCounts             map[string]int                   `json:"exclusion_counts"`
+	ClassCountsBeforeTextFilter map[string]int                   `json:"class_counts_before_text_filter"`
+	ClassCountsAfterTextFilter  map[string]int                   `json:"class_counts_after_text_filter"`
+	Split                       articleBaselineSplitSummary      `json:"split"`
+	ProductionReadiness         articleBaselineReadinessSummary  `json:"production_readiness"`
+	SmokeTestReadiness          articleBaselineReadinessSummary  `json:"smoke_test_readiness"`
+	BlockedReason               string                           `json:"blocked_reason,omitempty"`
 }
 
 func (service *api) trainingStatus(writer http.ResponseWriter, request *http.Request) {
@@ -192,7 +223,7 @@ func loadArticleBaselineStatus(path string) (articleBaselineStatusResponse, erro
 
 func sanitizeArticleBaselineReport(report articleBaselineReportFile) (articleBaselineStatusResponse, error) {
 	var response articleBaselineStatusResponse
-	if report.ReportSchemaVersion != articleBaselineReportSchemaVersion || report.DatasetContract != articleBaselineDatasetContract {
+	if report.ReportSchemaVersion < articleBaselineMinimumSchemaVersion || report.ReportSchemaVersion > articleBaselineReportSchemaVersion || report.DatasetContract != articleBaselineDatasetContract {
 		return response, errors.New("unsupported article baseline report contract")
 	}
 	fingerprint, found := strings.CutPrefix(report.DatasetFingerprint, "sha256:")
@@ -201,6 +232,20 @@ func sanitizeArticleBaselineReport(report articleBaselineReportFile) (articleBas
 	}
 	if _, err := time.Parse(time.RFC3339Nano, report.CreatedAt); err != nil {
 		return response, errors.New("invalid article baseline report timestamp")
+	}
+	if report.ReportSchemaVersion >= 2 {
+		if report.GeographySummary == nil {
+			return response, errors.New("article baseline report is missing geography summary")
+		}
+		if report.LatestReviewCount > 0 {
+			if _, err := time.Parse(time.RFC3339Nano, report.LatestReviewedAt); err != nil {
+				return response, errors.New("invalid article baseline latest review timestamp")
+			}
+		} else if report.LatestReviewedAt != "" {
+			return response, errors.New("unexpected article baseline latest review timestamp")
+		}
+	} else if report.GeographySummary != nil || report.LatestReviewedAt != "" {
+		return response, errors.New("schema-v1 article baseline report contains schema-v2 fields")
 	}
 	if report.LatestReviewCount < 0 || report.ResolvedSchemaV2Count < 0 || report.UsableTrainingRows < 0 || report.ResolvedSchemaV2Count > report.LatestReviewCount || report.UsableTrainingRows > report.ResolvedSchemaV2Count {
 		return response, errors.New("invalid article baseline report counts")
@@ -269,6 +314,10 @@ func sanitizeArticleBaselineReport(report articleBaselineReportFile) (articleBas
 	if err := validateArticleBaselineStatus(report, production.Ready, smoke.Ready); err != nil {
 		return response, err
 	}
+	geography, err := sanitizeArticleBaselineGeography(report.GeographySummary, report.UsableTrainingRows)
+	if err != nil {
+		return response, err
+	}
 
 	splitSummary.ClassCounts = cloneArticleBaselineSplitCounts(report.ProductionReadiness.SplitClassCounts)
 	blockedReason := report.BlockedReason
@@ -282,8 +331,11 @@ func sanitizeArticleBaselineReport(report articleBaselineReportFile) (articleBas
 		EvaluationTier:              report.EvaluationTier,
 		CreatedAt:                   report.CreatedAt,
 		LatestReviewCount:           report.LatestReviewCount,
+		LatestReviewedAt:            report.LatestReviewedAt,
+		DatasetFingerprint:          report.DatasetFingerprint,
 		ResolvedSchemaV2Count:       report.ResolvedSchemaV2Count,
 		UsableTrainingRows:          report.UsableTrainingRows,
+		GeographySummary:            geography,
 		ExclusionCounts:             cloneArticleBaselineCounts(report.ExclusionCounts),
 		ClassCountsBeforeTextFilter: cloneArticleBaselineCounts(report.LabelCountsBeforeTextFilter),
 		ClassCountsAfterTextFilter:  cloneArticleBaselineCounts(report.ProductionReadiness.UsableClassCounts),
@@ -291,6 +343,75 @@ func sanitizeArticleBaselineReport(report articleBaselineReportFile) (articleBas
 		ProductionReadiness:         production,
 		SmokeTestReadiness:          smoke,
 		BlockedReason:               blockedReason,
+	}, nil
+}
+
+func sanitizeArticleBaselineGeography(
+	geography *articleBaselineGeographySummary,
+	usableRows int,
+) (*articleBaselineGeographySummary, error) {
+	if geography == nil {
+		return nil, nil
+	}
+	if geography.Meaning != articleBaselineMapMeaning || geography.Source != articleBaselineMapSource ||
+		geography.UsableRows != usableRows || geography.MappableRows < 0 || geography.UnmappableRows < 0 ||
+		geography.MappableRows+geography.UnmappableRows != usableRows || geography.UniqueLocations < 0 ||
+		geography.LocationsReturned != len(geography.Locations) || geography.LocationsReturned < 0 ||
+		geography.LocationsReturned > maxArticleBaselineMapLocations || geography.UniqueLocations < geography.LocationsReturned {
+		return nil, errors.New("invalid article baseline geography summary")
+	}
+	if geography.Truncated {
+		if geography.UniqueLocations <= geography.LocationsReturned {
+			return nil, errors.New("invalid truncated article baseline geography summary")
+		}
+	} else if geography.UniqueLocations != geography.LocationsReturned {
+		return nil, errors.New("inconsistent article baseline geography locations")
+	}
+
+	locations := make([]articleBaselineMapLocation, 0, len(geography.Locations))
+	seen := make(map[string]struct{}, len(geography.Locations))
+	returnedRows := 0
+	for index, location := range geography.Locations {
+		if location.LocationName == "" || strings.TrimSpace(location.LocationName) != location.LocationName ||
+			utf8.RuneCountInString(location.LocationName) > 240 || strings.TrimSpace(location.CountryCode) != location.CountryCode ||
+			len(location.CountryCode) > 8 || math.IsNaN(location.Latitude) || math.IsInf(location.Latitude, 0) ||
+			math.IsNaN(location.Longitude) || math.IsInf(location.Longitude, 0) ||
+			location.Latitude < -90 || location.Latitude > 90 || location.Longitude < -180 || location.Longitude > 180 ||
+			location.ArticleCount <= 0 {
+			return nil, fmt.Errorf("invalid article baseline geography location %d", index)
+		}
+		if err := validateArticleBaselineClassCounts(location.ClassCounts, false); err != nil ||
+			sumArticleBaselineCounts(location.ClassCounts) != location.ArticleCount {
+			return nil, fmt.Errorf("invalid article baseline geography class counts at location %d", index)
+		}
+		key := fmt.Sprintf("%s\x00%s\x00%.5f\x00%.5f", location.LocationName, location.CountryCode, location.Latitude, location.Longitude)
+		if _, duplicate := seen[key]; duplicate {
+			return nil, errors.New("duplicate article baseline geography location")
+		}
+		seen[key] = struct{}{}
+		returnedRows += location.ArticleCount
+		locations = append(locations, articleBaselineMapLocation{
+			LocationName: location.LocationName,
+			CountryCode:  location.CountryCode,
+			Latitude:     location.Latitude,
+			Longitude:    location.Longitude,
+			ArticleCount: location.ArticleCount,
+			ClassCounts:  cloneArticleBaselineCounts(location.ClassCounts),
+		})
+	}
+	if returnedRows > geography.MappableRows || (!geography.Truncated && returnedRows != geography.MappableRows) {
+		return nil, errors.New("inconsistent article baseline geography row counts")
+	}
+	return &articleBaselineGeographySummary{
+		Meaning:           geography.Meaning,
+		Source:            geography.Source,
+		UsableRows:        geography.UsableRows,
+		MappableRows:      geography.MappableRows,
+		UnmappableRows:    geography.UnmappableRows,
+		UniqueLocations:   geography.UniqueLocations,
+		LocationsReturned: geography.LocationsReturned,
+		Truncated:         geography.Truncated,
+		Locations:         locations,
 	}, nil
 }
 
@@ -320,6 +441,17 @@ func requireArticleBaselineReportFields(raw []byte) error {
 	} {
 		if _, ok := fields[name]; !ok {
 			return errors.New("article baseline report is missing required fields")
+		}
+	}
+	var version int
+	if err := json.Unmarshal(fields["report_schema_version"], &version); err != nil {
+		return errors.New("invalid article baseline report schema version")
+	}
+	if version >= 2 {
+		for _, name := range []string{"latest_reviewed_at", "geography_summary"} {
+			if _, ok := fields[name]; !ok {
+				return errors.New("article baseline report is missing schema-v2 fields")
+			}
 		}
 	}
 	return nil

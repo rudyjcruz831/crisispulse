@@ -51,6 +51,15 @@ uses a manual title override or a publisher title with unknown provenance.
 This is safe to run at any dataset size. It does not train. The report lists
 every gate and its actual and required values.
 
+Report schema version 2 also records the newest review timestamp, a SHA-256
+fingerprint of the exact prepared rows, and an aggregate geography summary.
+The geography data contains only trusted single-region or dominant-region
+coordinates from the permanent archive, grouped into at most 250 locations.
+It deliberately excludes article IDs, titles, URLs, and publisher details.
+These points describe places mentioned by articles; they are not verified
+physical flood events. Version-1 reports remain readable but do not contain
+the geography or newest-review fields.
+
 For a preliminary CPU evaluation, add `--train` and retain the required raw
 test predictions:
 

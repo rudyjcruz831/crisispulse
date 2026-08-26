@@ -235,6 +235,11 @@ def _validate_article_review(payload: dict[str, Any], *, label: str) -> None:
     reviewed_at = _string_field(payload, "reviewed_at", label=label)
     decision_schema_version = payload.get("decision_schema_version", 1)
     tags = payload.get("tags", [])
+    # The Go API serializes an empty optional slice as JSON null. Treat that
+    # representation as an empty tag list while continuing to reject every
+    # other non-list value.
+    if tags is None:
+        tags = []
     if not ARTICLE_ID_PATTERN.fullmatch(article_id):
         raise ValidationError(f"{label} has an invalid article_id")
     if not 1 <= _byte_length(title) <= 1024 or _byte_length(source_domain) > 255:
