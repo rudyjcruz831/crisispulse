@@ -2,6 +2,8 @@ $ErrorActionPreference = "Stop"
 
 $RepositoryRoot = Split-Path -Parent $PSScriptRoot
 $EnvironmentPath = Join-Path $RepositoryRoot ".env.production"
+$EncryptedBackupRunner = Join-Path $PSScriptRoot "run-encrypted-offsite-backup.ps1"
+$EncryptionConfigPath = Join-Path $env:LOCALAPPDATA "CrisisPulse\backup-encryption\config.json"
 if (-not (Test-Path -LiteralPath $EnvironmentPath)) {
     throw "The local production environment file is missing."
 }
@@ -41,4 +43,20 @@ try {
 finally {
     Pop-Location
 }
-exit $ExitCode
+if ($ExitCode -ne 0) {
+    exit $ExitCode
+}
+
+# Off-device encryption is optional on hosts that have not run the setup yet.
+# Once configured, a failed encrypted copy makes the scheduled task fail loudly
+# while preserving the already verified local archive.
+if (Test-Path -LiteralPath $EncryptionConfigPath) {
+    if (-not (Test-Path -LiteralPath $EncryptedBackupRunner)) {
+        throw "Encrypted backup is configured, but its runner is missing."
+    }
+    & $EncryptedBackupRunner -ConfigPath $EncryptionConfigPath
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
+}
+exit 0

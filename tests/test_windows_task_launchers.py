@@ -41,8 +41,41 @@ def test_production_backup_task_runs_daily_at_a_fixed_utc_time() -> None:
     assert "New-ScheduledTaskTrigger -Daily" in installer
     assert "-StartWhenAvailable" in installer
     assert "-MultipleInstances IgnoreNew" in installer
-    assert "New-TimeSpan -Minutes 40" in installer
+    assert "New-TimeSpan -Minutes 90" in installer
     assert "run --rm backup" in runner
     assert "Start-Process -FilePath $DockerDesktop -WindowStyle Hidden" in runner
     assert "$ExitCode = $LASTEXITCODE" in runner
     assert "exit $ExitCode" in runner
+    assert '"run-encrypted-offsite-backup.ps1"' in runner
+    assert "if (Test-Path -LiteralPath $EncryptionConfigPath)" in runner
+
+
+def test_encrypted_backup_secrets_stay_outside_the_repository() -> None:
+    setup = (ROOT / "scripts/setup-encrypted-offsite-backup.ps1").read_text(
+        encoding="utf-8"
+    )
+    runner = (ROOT / "scripts/run-encrypted-offsite-backup.ps1").read_text(
+        encoding="utf-8"
+    )
+    common = (ROOT / "scripts/backup-encryption-common.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'Join-Path $env:LOCALAPPDATA "CrisisPulse\\backup-encryption\\config.json"' in common
+    assert '"SAVE-THIS-RECOVERY-CODE.txt"' in setup
+    assert 'Join-Path $OneDriveRoot "CrisisPulse Encrypted Backups"' in setup
+    assert "Export-PfxCertificate" in setup
+    assert "Protect-CmsMessage" in common
+    assert "HMACSHA256" in common
+    assert "DataProtectionScope]::CurrentUser" in common
+    assert "$EncryptedFile.Length -gt 134217728" in common
+    assert "$DeclaredArchiveBytes -gt 67108864" in common
+    assert "max_archive_bytes = 67108864" in setup
+    assert "Test-CrisisPulseEncryptedBackup" in setup
+    assert setup.index('Write-CrisisPulseUtf8Atomic -Path $RecoveryCodePath') < setup.index(
+        '-Path $ConfigPath `'
+    )
+    assert "$EnvironmentOriginalBytes" in setup
+    assert "$EnvironmentRollback" in setup
+    assert "cloud_visibility_confirmed = $false" in runner
+    assert "RecoveryPasswordText" not in runner

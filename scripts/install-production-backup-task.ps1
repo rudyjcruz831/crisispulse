@@ -36,7 +36,7 @@ $Settings = New-ScheduledTaskSettingsSet `
     -StartWhenAvailable `
     -AllowStartIfOnBatteries `
     -DontStopIfGoingOnBatteries `
-    -ExecutionTimeLimit (New-TimeSpan -Minutes 40) `
+    -ExecutionTimeLimit (New-TimeSpan -Minutes 90) `
     -MultipleInstances IgnoreNew
 $Principal = New-ScheduledTaskPrincipal `
     -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) `
@@ -45,7 +45,7 @@ $Principal = New-ScheduledTaskPrincipal `
 
 Register-ScheduledTask `
     -TaskName $TaskName `
-    -Description "Creates and verifies a CrisisPulse backup every day at the configured UTC time." `
+    -Description "Creates and verifies a CrisisPulse backup and its configured encrypted off-device copy every day." `
     -Action $Action `
     -Trigger $Trigger `
     -Settings $Settings `

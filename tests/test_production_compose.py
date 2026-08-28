@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from datetime import UTC, datetime, timedelta, timezone
@@ -64,3 +65,47 @@ def test_refresh_service_has_a_hard_cpu_ceiling() -> None:
 
     environment = (ROOT / ".env.production.example").read_text(encoding="utf-8")
     assert "CRISISPULSE_REFRESH_CPUS=8.0" in environment
+
+
+def test_backup_bind_mount_supports_an_explicit_host_path_with_spaces(tmp_path: Path) -> None:
+    if shutil.which("docker") is None:
+        pytest.skip("Docker Compose is required to render the production configuration")
+
+    backup_path = (tmp_path / "CrisisPulse local backups").resolve()
+    environment = os.environ.copy()
+    environment["CRISISPULSE_BACKUP_DIR"] = str(backup_path)
+    result = subprocess.run(
+        [
+            "docker",
+            "compose",
+            "--env-file",
+            str(ROOT / ".env.production.example"),
+            "-f",
+            str(ROOT / "compose.production.yml"),
+            "--profile",
+            "maintenance",
+            "config",
+            "--format",
+            "json",
+        ],
+        cwd=ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    config = json.loads(result.stdout)
+    expected = {
+        "init-volumes": ("/backups", False),
+        "api": ("/var/lib/crisispulse-backups", True),
+        "backup": ("/backups", False),
+        "restore": ("/backups", True),
+    }
+    for service_name, (target, read_only) in expected.items():
+        mounts = config["services"][service_name]["volumes"]
+        mount = next(item for item in mounts if item["target"] == target)
+        assert Path(mount["source"]).resolve() == backup_path
+        assert mount.get("read_only", False) is read_only
