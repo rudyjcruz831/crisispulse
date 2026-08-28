@@ -32,35 +32,74 @@ const (
 	trainingDataSchemaVersion  = 1
 	maximumArticleReviewTags   = 8
 	maximumArticleTagRunes     = 32
+	articleReviewLockTimeout   = 5 * time.Second
+	articleReviewLockStaleAge  = time.Hour
 )
 
 var articleIDPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
 
 type qualityArticle struct {
-	ArticleID             string   `json:"article_id"`
-	SeenAt                string   `json:"seen_at"`
-	Title                 string   `json:"title"`
-	TitleSource           string   `json:"title_source,omitempty"`
-	URL                   string   `json:"url"`
-	SourceDomain          string   `json:"source_domain"`
-	LocationName          string   `json:"location_name"`
-	MatchStrength         string   `json:"match_strength"`
-	ReviewBucket          string   `json:"review_bucket"`
-	ReviewReason          string   `json:"review_reason"`
-	Themes                []string `json:"themes"`
-	QualityFlags          []string `json:"quality_flags"`
-	Decision              string   `json:"decision,omitempty"`
-	DecisionSchemaVersion int      `json:"decision_schema_version,omitempty"`
-	Tags                  []string `json:"tags,omitempty"`
-	ReviewedAt            string   `json:"reviewed_at,omitempty"`
+	ArticleID             string                         `json:"article_id"`
+	SeenAt                string                         `json:"seen_at"`
+	Title                 string                         `json:"title"`
+	TitleSource           string                         `json:"title_source,omitempty"`
+	URL                   string                         `json:"url"`
+	SourceDomain          string                         `json:"source_domain"`
+	LocationName          string                         `json:"location_name"`
+	MatchStrength         string                         `json:"match_strength"`
+	ReviewBucket          string                         `json:"review_bucket"`
+	ReviewReason          string                         `json:"review_reason"`
+	Themes                []string                       `json:"themes"`
+	QualityFlags          []string                       `json:"quality_flags"`
+	Decision              string                         `json:"decision,omitempty"`
+	DecisionSchemaVersion int                            `json:"decision_schema_version,omitempty"`
+	Tags                  []string                       `json:"tags,omitempty"`
+	ReviewedAt            string                         `json:"reviewed_at,omitempty"`
+	SelectionIntent       *qualityArticleSelectionIntent `json:"selection_intent,omitempty"`
 }
 
 type qualitySampleFile struct {
-	Version          int              `json:"version"`
-	SampleDate       string           `json:"sample_date"`
-	ArchiveArticles  int              `json:"archive_articles"`
-	EligibleArticles int              `json:"eligible_articles"`
-	Articles         []qualityArticle `json:"articles"`
+	Version                int                           `json:"version"`
+	SampleDate             string                        `json:"sample_date"`
+	ArchiveArticles        int                           `json:"archive_articles"`
+	EligibleArticles       int                           `json:"eligible_articles"`
+	QueueCandidateArticles int                           `json:"queue_candidate_articles,omitempty"`
+	SelectionIntent        *qualitySampleSelectionIntent `json:"selection_intent,omitempty"`
+	Articles               []qualityArticle              `json:"articles"`
+}
+
+type qualityArticleSelectionIntent struct {
+	Rank          int      `json:"rank"`
+	SamplingSplit string   `json:"sampling_split,omitempty"`
+	Reasons       []string `json:"reasons"`
+}
+
+type qualitySampleSelectionIntent struct {
+	Strategy              string                    `json:"strategy"`
+	Target                string                    `json:"target"`
+	UsableRows            int                       `json:"usable_rows"`
+	UsableRowsMinimum     int                       `json:"usable_rows_minimum"`
+	ClassCounts           map[string]int            `json:"class_counts"`
+	ClassMinimum          int                       `json:"class_minimum"`
+	DistinctArticleDates  int                       `json:"distinct_article_dates"`
+	ArticleDateMinimum    int                       `json:"article_date_minimum"`
+	PublisherGroups       int                       `json:"publisher_groups"`
+	PublisherGroupMinimum int                       `json:"publisher_group_minimum"`
+	InferenceTextCoverage float64                   `json:"inference_text_coverage"`
+	InferenceTextMinimum  float64                   `json:"inference_text_minimum"`
+	SplitClassCounts      map[string]map[string]int `json:"split_class_counts"`
+	SplitClassMinimums    map[string]int            `json:"split_class_minimums"`
+	ReadinessStatus       string                    `json:"readiness_status"`
+	ProductionMinimums    qualityProductionMinimums `json:"production_minimums"`
+}
+
+type qualityProductionMinimums struct {
+	TotalUsableRows       int            `json:"total_usable_rows"`
+	ClassMinimum          int            `json:"class_minimum"`
+	ArticleDates          int            `json:"article_dates"`
+	PublisherGroups       int            `json:"publisher_groups"`
+	InferenceTextCoverage float64        `json:"inference_text_coverage"`
+	SplitClassMinimums    map[string]int `json:"split_class_minimums"`
 }
 
 type articleReviewRequest struct {
@@ -72,6 +111,7 @@ type articleReviewRequest struct {
 type articleReviewRecord struct {
 	ArticleID             string   `json:"article_id"`
 	Title                 string   `json:"title"`
+	TitleSource           string   `json:"title_source,omitempty"`
 	URL                   string   `json:"url"`
 	SourceDomain          string   `json:"source_domain"`
 	MatchStrength         string   `json:"match_strength"`
@@ -369,7 +409,7 @@ func (service *api) trainingArticleExport(writer http.ResponseWriter, request *h
 	_, _ = output.Write([]byte{0xef, 0xbb, 0xbf})
 	csvWriter := csv.NewWriter(&output)
 	csvWriter.UseCRLF = true
-	columns := []string{"article_id", "title", "url", "source_domain", "match_strength", "review_bucket", "decision", "decision_schema_version", "reviewed_at", "tags", "training_eligible", "exclusion_reason"}
+	columns := []string{"article_id", "title", "title_source", "url", "source_domain", "match_strength", "review_bucket", "decision", "decision_schema_version", "reviewed_at", "tags", "training_eligible", "exclusion_reason"}
 	if err := csvWriter.Write(columns); err != nil {
 		writeError(writer, http.StatusInternalServerError, "training article export unavailable")
 		return
@@ -378,6 +418,7 @@ func (service *api) trainingArticleExport(writer http.ResponseWriter, request *h
 		row := []string{
 			article.ArticleID,
 			article.Title,
+			article.TitleSource,
 			article.URL,
 			article.SourceDomain,
 			article.MatchStrength,
@@ -422,13 +463,13 @@ func (service *api) qualityArticleExport(writer http.ResponseWriter, request *ht
 	}
 	var output bytes.Buffer
 	csvWriter := csv.NewWriter(&output)
-	columns := []string{"article_id", "title", "url", "source_domain", "match_strength", "review_bucket", "decision", "decision_schema_version", "reviewed_at", "tags"}
+	columns := []string{"article_id", "title", "title_source", "url", "source_domain", "match_strength", "review_bucket", "decision", "decision_schema_version", "reviewed_at", "tags"}
 	if err := csvWriter.Write(columns); err != nil {
 		writeError(writer, http.StatusInternalServerError, "article review export unavailable")
 		return
 	}
 	for _, review := range reviews {
-		row := []string{review.ArticleID, review.Title, review.URL, review.SourceDomain, review.MatchStrength, review.ReviewBucket, review.Decision, fmt.Sprintf("%d", review.DecisionSchemaVersion), review.ReviewedAt, strings.Join(review.Tags, "|")}
+		row := []string{review.ArticleID, review.Title, review.TitleSource, review.URL, review.SourceDomain, review.MatchStrength, review.ReviewBucket, review.Decision, fmt.Sprintf("%d", review.DecisionSchemaVersion), review.ReviewedAt, strings.Join(review.Tags, "|")}
 		for index := range row {
 			row[index] = articleSpreadsheetSafe(row[index])
 		}
@@ -478,16 +519,40 @@ func (service *api) loadQualitySample() (qualitySampleFile, error) {
 	if err := decoder.Decode(&sample); err != nil || requireJSONEnd(decoder) != nil {
 		return qualitySampleFile{}, errors.New("invalid quality sample")
 	}
-	if sample.Version != 1 || sample.ArchiveArticles < 0 || sample.EligibleArticles < 0 || len(sample.Articles) == 0 || len(sample.Articles) > 40 {
+	if (sample.Version != 1 && sample.Version != 2) || sample.ArchiveArticles < 0 || sample.EligibleArticles < 0 || len(sample.Articles) > 40 || (sample.Version == 1 && len(sample.Articles) == 0) {
 		return qualitySampleFile{}, errors.New("invalid quality sample metadata")
+	}
+	if sample.Version == 1 && sample.SelectionIntent != nil {
+		return qualitySampleFile{}, errors.New("invalid quality sample selection intent")
+	}
+	if sample.Version == 2 {
+		if sample.QueueCandidateArticles < 0 {
+			return qualitySampleFile{}, errors.New("invalid quality sample candidate count")
+		}
+		if err := validateQualitySampleSelectionIntent(sample.SelectionIntent); err != nil {
+			return qualitySampleFile{}, err
+		}
 	}
 	if _, err := time.Parse("2006-01-02", sample.SampleDate); err != nil {
 		return qualitySampleFile{}, errors.New("invalid quality sample date")
 	}
 	seen := make(map[string]bool, len(sample.Articles))
+	seenRanks := make(map[int]bool, len(sample.Articles))
 	for _, article := range sample.Articles {
 		if err := validateQualityArticle(article); err != nil {
 			return qualitySampleFile{}, err
+		}
+		if sample.Version == 1 && article.SelectionIntent != nil {
+			return qualitySampleFile{}, errors.New("invalid quality article selection intent")
+		}
+		if sample.Version == 2 {
+			if err := validateQualityArticleSelectionIntent(article.SelectionIntent, len(sample.Articles)); err != nil {
+				return qualitySampleFile{}, err
+			}
+			if seenRanks[article.SelectionIntent.Rank] {
+				return qualitySampleFile{}, errors.New("duplicate quality article selection rank")
+			}
+			seenRanks[article.SelectionIntent.Rank] = true
 		}
 		if seen[article.ArticleID] {
 			return qualitySampleFile{}, errors.New("duplicate quality sample article")
@@ -495,6 +560,108 @@ func (service *api) loadQualitySample() (qualitySampleFile, error) {
 		seen[article.ArticleID] = true
 	}
 	return sample, nil
+}
+
+var qualitySamplingLabels = map[string]bool{
+	"reported_flooding":  true,
+	"flood_risk_warning": true,
+	"heavy_rain_only":    true,
+	"not_flood_related":  true,
+}
+
+var qualitySelectionReasons = map[string]bool{
+	"underrepresented_class":   true,
+	"underrepresented_split":   true,
+	"new_article_date":         true,
+	"new_publisher_group":      true,
+	"inference_text_available": true,
+	"needs_detailed_relabel":   true,
+	"balanced_fallback":        true,
+}
+
+func validateQualityArticleSelectionIntent(intent *qualityArticleSelectionIntent, articleCount int) error {
+	if intent == nil || intent.Rank < 1 || intent.Rank > articleCount || len(intent.Reasons) < 1 || len(intent.Reasons) > 7 {
+		return errors.New("invalid quality article selection intent")
+	}
+	if intent.SamplingSplit != "" && intent.SamplingSplit != "training" && intent.SamplingSplit != "validation" && intent.SamplingSplit != "test" {
+		return errors.New("invalid quality article sampling split")
+	}
+	seen := make(map[string]bool, len(intent.Reasons))
+	for _, reason := range intent.Reasons {
+		if !qualitySelectionReasons[reason] || seen[reason] {
+			return errors.New("invalid quality article selection reason")
+		}
+		seen[reason] = true
+	}
+	return nil
+}
+
+func validateQualitySampleSelectionIntent(intent *qualitySampleSelectionIntent) error {
+	if intent == nil || intent.Strategy != "training_readiness_v1" || intent.Target != "cpu_smoke" {
+		return errors.New("invalid quality sample selection intent")
+	}
+	if intent.UsableRows < 0 || intent.UsableRowsMinimum < 1 || intent.ClassMinimum < 1 || intent.ArticleDateMinimum < 1 || intent.PublisherGroupMinimum < 1 || intent.DistinctArticleDates < 0 || intent.PublisherGroups < 0 {
+		return errors.New("invalid quality sample readiness counts")
+	}
+	if intent.InferenceTextCoverage < 0 || intent.InferenceTextCoverage > 1 || intent.InferenceTextMinimum < 0 || intent.InferenceTextMinimum > 1 {
+		return errors.New("invalid quality sample text coverage")
+	}
+	if intent.ReadinessStatus != "computed" && intent.ReadinessStatus != "unavailable" {
+		return errors.New("invalid quality sample readiness status")
+	}
+	if err := validateQualityClassCounts(intent.ClassCounts); err != nil {
+		return err
+	}
+	if err := validateQualitySplitCounts(intent.SplitClassCounts, true); err != nil {
+		return err
+	}
+	if err := validateQualitySplitMinimums(intent.SplitClassMinimums); err != nil {
+		return err
+	}
+	production := intent.ProductionMinimums
+	if production.TotalUsableRows < 1 || production.ClassMinimum < 1 || production.ArticleDates < 1 || production.PublisherGroups < 1 || production.InferenceTextCoverage < 0 || production.InferenceTextCoverage > 1 {
+		return errors.New("invalid quality sample production minimums")
+	}
+	return validateQualitySplitMinimums(production.SplitClassMinimums)
+}
+
+func validateQualityClassCounts(counts map[string]int) error {
+	if len(counts) != len(qualitySamplingLabels) {
+		return errors.New("invalid quality sample class counts")
+	}
+	for label := range qualitySamplingLabels {
+		if count, ok := counts[label]; !ok || count < 0 {
+			return errors.New("invalid quality sample class counts")
+		}
+	}
+	return nil
+}
+
+func validateQualitySplitCounts(counts map[string]map[string]int, allowUnavailable bool) error {
+	if allowUnavailable && len(counts) == 0 {
+		return nil
+	}
+	if len(counts) != 3 {
+		return errors.New("invalid quality sample split counts")
+	}
+	for _, split := range []string{"training", "validation", "test"} {
+		if err := validateQualityClassCounts(counts[split]); err != nil {
+			return errors.New("invalid quality sample split counts")
+		}
+	}
+	return nil
+}
+
+func validateQualitySplitMinimums(minimums map[string]int) error {
+	if len(minimums) != 3 {
+		return errors.New("invalid quality sample split minimums")
+	}
+	for _, split := range []string{"training", "validation", "test"} {
+		if minimum, ok := minimums[split]; !ok || minimum < 1 {
+			return errors.New("invalid quality sample split minimums")
+		}
+	}
+	return nil
 }
 
 func validateQualityArticle(article qualityArticle) error {
@@ -624,10 +791,38 @@ func isArticleDecisionV1(decision string) bool {
 	}
 }
 
+func acquireArticleReviewFileLock(reviewPath string) (func(), error) {
+	lockPath := reviewPath + ".lock"
+	deadline := time.Now().Add(articleReviewLockTimeout)
+	for {
+		file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err == nil {
+			if closeErr := file.Close(); closeErr != nil {
+				_ = os.Remove(lockPath)
+				return nil, closeErr
+			}
+			return func() { _ = os.Remove(lockPath) }, nil
+		}
+		if !os.IsExist(err) {
+			return nil, err
+		}
+		if info, statErr := os.Stat(lockPath); statErr == nil && time.Since(info.ModTime()) > articleReviewLockStaleAge {
+			if removeErr := os.Remove(lockPath); removeErr == nil || os.IsNotExist(removeErr) {
+				continue
+			}
+		}
+		if time.Now().After(deadline) {
+			return nil, errors.New("article review log is busy")
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+}
+
 func (store *articleReviewStore) save(article qualityArticle, decision string, tags []string) (articleReviewRecord, error) {
 	record := articleReviewRecord{
 		ArticleID:             article.ArticleID,
 		Title:                 article.Title,
+		TitleSource:           article.TitleSource,
 		URL:                   article.URL,
 		SourceDomain:          article.SourceDomain,
 		MatchStrength:         article.MatchStrength,
@@ -647,12 +842,17 @@ func (store *articleReviewStore) save(article qualityArticle, decision string, t
 	line = append(line, '\n')
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	if err := os.MkdirAll(filepath.Dir(store.path), 0o750); err != nil {
+		return articleReviewRecord{}, err
+	}
+	releaseLock, err := acquireArticleReviewFileLock(store.path)
+	if err != nil {
+		return articleReviewRecord{}, err
+	}
+	defer releaseLock()
 	if info, err := os.Stat(store.path); err == nil && info.Size()+int64(len(line)) > maxArticleReviewLogBytes {
 		return articleReviewRecord{}, errors.New("article review log size limit reached")
 	} else if err != nil && !os.IsNotExist(err) {
-		return articleReviewRecord{}, err
-	}
-	if err := os.MkdirAll(filepath.Dir(store.path), 0o750); err != nil {
 		return articleReviewRecord{}, err
 	}
 	file, err := os.OpenFile(store.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
@@ -750,6 +950,9 @@ func validateStoredArticleReview(record articleReviewRecord) error {
 	}
 	if len(record.Title) < 1 || len(record.Title) > 1024 || len(record.SourceDomain) > 255 || !safeExternalArticleURL(record.URL) {
 		return errors.New("invalid stored article evidence")
+	}
+	if record.TitleSource != "" && record.TitleSource != "manual_override" && record.TitleSource != "publisher_metadata" && record.TitleSource != "url_path" && record.TitleSource != "unavailable" {
+		return errors.New("invalid stored article title source")
 	}
 	if record.MatchStrength != "high" && record.MatchStrength != "weak" {
 		return errors.New("invalid stored article strength")

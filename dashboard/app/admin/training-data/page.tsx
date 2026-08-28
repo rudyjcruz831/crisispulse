@@ -182,6 +182,11 @@ const messages = defineMessages({
   classCount: "{count} eligible labels",
   cpuMinimum: "CPU minimum",
   gpuMinimum: "GPU minimum",
+  smartReviewEyebrow: "Close the next data gap",
+  smartReviewHeading: "Review the highest-value cards next.",
+  smartReviewDescription: "Admin keeps unfinished cards stable, removes completed cards, and refills open places with archive-backed selections that improve label balance, date, publisher, inference-text, or split coverage.",
+  smartReviewHint: "The queue never reveals a guessed label. Your independent, evidence-based decision is the only answer saved for training.",
+  openSmartReviewQueue: "Open smart review queue",
   eligibilityHeading: "What is usable today",
   eligibilityDescription: "Excluded reviews are preserved so nothing is erased. They need a detailed correction before they can enter training.",
   eligibleForTraining: "Eligible for training",
@@ -432,6 +437,11 @@ const messages = defineMessages({
   classCount: "{count} etiquetas elegibles",
   cpuMinimum: "Mínimo para CPU",
   gpuMinimum: "Mínimo para GPU",
+  smartReviewEyebrow: "Cierre la siguiente brecha de datos",
+  smartReviewHeading: "Revise ahora las tarjetas de mayor valor.",
+  smartReviewDescription: "Administración mantiene estables las tarjetas sin terminar, retira las completadas y rellena los espacios con selecciones respaldadas por el archivo que mejoran el equilibrio de etiquetas, fechas, editores, texto de inferencia o cobertura entre particiones.",
+  smartReviewHint: "La cola nunca revela una etiqueta estimada. Su decisión independiente y basada en evidencia es la única respuesta guardada para el entrenamiento.",
+  openSmartReviewQueue: "Abrir cola de revisión inteligente",
   eligibilityHeading: "Qué se puede usar hoy",
   eligibilityDescription: "Las revisiones excluidas se conservan para no borrar nada. Necesitan una corrección detallada antes de entrar al entrenamiento.",
   eligibleForTraining: "Elegibles para entrenamiento",
@@ -1974,6 +1984,15 @@ export default function TrainingDataPage() {
                 );
               })}
             </div>
+            <aside className="tdl-smart-review-cta" aria-labelledby="smart-review-cta-heading">
+              <div>
+                <p className="eyebrow">{t("smartReviewEyebrow")}</p>
+                <h3 id="smart-review-cta-heading">{t("smartReviewHeading")}</h3>
+                <p>{t("smartReviewDescription")}</p>
+                <small>{t("smartReviewHint")}</small>
+              </div>
+              <Link href="/admin#article-quality">{t("openSmartReviewQueue")}<span aria-hidden="true">→</span></Link>
+            </aside>
           </section>
 
           <section className="tdl-section tdl-eligibility" aria-labelledby="eligibility-heading">

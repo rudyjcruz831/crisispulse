@@ -57,6 +57,13 @@ ARTICLE_TAG_MAX_COUNT = 8
 ARTICLE_TAG_MAX_LENGTH = 32
 MATCH_STRENGTHS = {"high", "weak"}
 REVIEW_BUCKETS = {"high_match", "headline_conflict", "ambiguous_match"}
+ARTICLE_TITLE_SOURCES = {
+    "",
+    "manual_override",
+    "publisher_metadata",
+    "url_path",
+    "unavailable",
+}
 
 
 class ValidationError(ValueError):
@@ -235,6 +242,7 @@ def _validate_article_review(payload: dict[str, Any], *, label: str) -> None:
     reviewed_at = _string_field(payload, "reviewed_at", label=label)
     decision_schema_version = payload.get("decision_schema_version", 1)
     tags = payload.get("tags", [])
+    title_source = payload.get("title_source", "")
     # The Go API serializes an empty optional slice as JSON null. Treat that
     # representation as an empty tag list while continuing to reject every
     # other non-list value.
@@ -250,6 +258,8 @@ def _validate_article_review(payload: dict[str, Any], *, label: str) -> None:
         raise ValidationError(f"{label} has an invalid match_strength")
     if review_bucket not in REVIEW_BUCKETS:
         raise ValidationError(f"{label} has an invalid review_bucket")
+    if not isinstance(title_source, str) or title_source not in ARTICLE_TITLE_SOURCES:
+        raise ValidationError(f"{label} has an invalid title_source")
     if (
         isinstance(decision_schema_version, bool)
         or not isinstance(decision_schema_version, int)

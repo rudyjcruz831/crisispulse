@@ -35,9 +35,28 @@ all collection metadata. The runner joins its latest decision per article to
 - text that is available through the same path at live inference.
 
 An archive publisher title is used only when the archive records
-`publisher_metadata` provenance. With the current archive schema, the runner
-uses the existing conservative URL-headline parser instead. It never silently
-uses a manual title override or a publisher title with unknown provenance.
+`publisher_metadata` provenance. A review title can also be used when the API
+recorded `title_source: publisher_metadata`, the review URL exactly equals the
+archive URL, and the normalized review and archive publishers match. Otherwise
+the runner uses the existing conservative URL-headline parser. It never
+silently uses a manual title override, stored URL-path display text, or a
+publisher title with unknown provenance.
+
+Older reviews can be audited against the local publisher-title cache without
+rewriting history. The following command is dry-run by default and reports how
+many exact, live-path matches can receive a new append-only provenance record:
+
+```powershell
+.\.venv\Scripts\python.exe -m pipelines.backfill_review_title_sources `
+  --reviews <path-to-article-reviews.jsonl> `
+  --archive <path-to-flood_articles_archive.parquet> `
+  --title-cache <path-to-publisher-title-cache.json>
+```
+
+After reviewing that count, repeat with `--apply`. The tool never accesses the
+network or changes a label. It appends only when the cached publisher title,
+review title, URL, and normalized publisher all match exactly; a second run is
+idempotent.
 
 ## Run a readiness audit
 

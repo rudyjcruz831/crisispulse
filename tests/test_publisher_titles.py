@@ -204,6 +204,8 @@ def test_title_normalization_rejects_domains_routes_and_article_ids():
     ) is None
     assert normalize_publisher_title("Access Restricted in Your Area | Publisher") is None
     assert normalize_publisher_title("Title of the Page") is None
+    assert normalize_publisher_title("JavaScript is disabled") is None
+    assert normalize_publisher_title("You need to enable JavaScript to run this app") is None
     assert normalize_publisher_title("8-19-26 - KAJN Radio") is None
     assert normalize_publisher_title(
         "KAJN Jesus FM 102.9",

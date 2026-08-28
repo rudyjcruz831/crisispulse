@@ -30,7 +30,7 @@ The default address is `http://127.0.0.1:8080`, and the default allowed dashboar
 | `POST` | `/api/v1/reviews` | Append a validated review decision to the local audit log. |
 | `GET` | `/api/v1/reviews/summary` | Return label counts and sample-readiness metrics. |
 | `GET` | `/api/v1/reviews/export.csv` | Download the latest decision for each reviewed signal as CSV. |
-| `GET` | `/api/v1/quality/articles` | Return the current balanced daily article sample with any saved decisions. |
+| `GET` | `/api/v1/quality/articles` | Return the current review-aware Smart Review Queue, sampling intent, and any saved decisions. |
 | `POST` | `/api/v1/quality/articles` | Append a validated relevance decision for an article in the current sample. |
 | `GET` | `/api/v1/quality/articles/summary` | Return guarded article-filter quality measurements and review progress. |
 | `GET` | `/api/v1/quality/articles/export.csv` | Download the latest article relevance decision per article as CSV. |
@@ -74,7 +74,11 @@ The summary counts only the latest decision for each stable signal ID. `confirme
 
 ### Article-filter quality
 
-The daily sample contains 24 safe publisher links drawn deterministically from recent permanent history: eight strong matches, eight weak headline conflicts, and eight other ambiguous matches when each group has enough rows. Version 2 article-review `POST` requests accept exactly `reported_flooding`, `flood_risk_warning`, `heavy_rain_only`, `not_flood_related`, or `uncertain` for an article in the current sample. They may also carry up to eight optional custom context tags. The server normalizes each tag to a distinct lowercase Unicode letter/digit slug of at most 32 characters, writes `decision_schema_version: 2`, and copies the system classification from the server-side sample rather than trusting browser-supplied metadata.
+The Smart Review Queue contains up to 24 safe publisher links from distinct story groups, drawn deterministically from recent permanent history. It preserves unfinished cards during the UTC day, removes completed version-2 decisions, replenishes open positions after a refresh, and prioritizes legacy re-labeling plus the class, chronological-split, date, publisher, and inference-text gaps blocking the first local CPU smoke test. When authoritative readiness is unavailable it falls back to the earlier balanced strong-match, headline-conflict, and ambiguous-match order.
+
+The response's top-level `selection_intent` describes the current dataset and active thresholds. Each article can include a ranked `selection_intent` with an estimated `sampling_split` and neutral selection reasons. Internal class-balancing guesses are intentionally omitted so the API and dashboard cannot anchor the human reviewer. Version 1 sample files remain readable during deployment rollover, while version 2 metadata is strictly validated before the API returns it. A valid version 2 response may contain an empty `articles` array when the current queue is complete.
+
+Version 2 article-review `POST` requests accept exactly `reported_flooding`, `flood_risk_warning`, `heavy_rain_only`, `not_flood_related`, or `uncertain` for an article in the current sample. They may also carry up to eight optional custom context tags. The server normalizes each tag to a distinct lowercase Unicode letter/digit slug of at most 32 characters, writes `decision_schema_version: 2`, and copies the article evidence and `title_source` provenance from the server-side sample rather than trusting browser-supplied metadata. Older records without `title_source` remain readable. The guarded trainer uses a stored review title only when its source is `publisher_metadata` and its URL and normalized publisher exactly bind to the permanent archive; manual or unproven display titles never become model input.
 
 The labels follow a fixed precedence: reported physical flooding first; otherwise an explicit flood forecast, watch, warning, or risk; otherwise heavy rain or severe weather without explicit flood evidence; otherwise not flood-related. `uncertain` is reserved for unavailable, contradictory, or insufficient evidence. The first four labels are resolved training classes. `uncertain` is retained but excluded from rate denominators.
 
@@ -108,6 +112,7 @@ Strong-match and blocked-match flood-related rates count `reported_flooding` plu
     {
       "article_id": "0000000000000000000000000000000000000000000000000000000000000000",
       "title": "Flood closes local road",
+      "title_source": "publisher_metadata",
       "url": "https://news.example/flood-closes-road",
       "source_domain": "news.example",
       "match_strength": "high",
@@ -130,7 +135,7 @@ Eligibility is deterministic and does not imply that the sample is large enough 
 - A version 1 decision is excluded with `exclusion_reason: "legacy_schema"`, including historical records that originally omitted the schema-version field.
 - Every article row includes `training_eligible` and `exclusion_reason`. Eligible rows use an empty exclusion reason. `summary.total_articles` includes eligible and excluded rows.
 
-`GET /api/v1/training/articles/export.csv` exports the same latest-label audit population, including excluded rows. Its columns are `article_id`, `title`, `url`, `source_domain`, `match_strength`, `review_bucket`, `decision`, `decision_schema_version`, `reviewed_at`, `tags`, `training_eligible`, and `exclusion_reason`. Tags are pipe-separated. The file uses a UTF-8 byte-order mark and CRLF rows for Excel compatibility. Cells derived from publisher or reviewer data are protected against spreadsheet formula execution: dangerous leading `=`, `+`, `-`, `@`, tab, or carriage-return characters are prefixed with an apostrophe. Both training endpoints use `Cache-Control: no-store`; the CSV export does not modify review history.
+`GET /api/v1/training/articles/export.csv` exports the same latest-label audit population, including excluded rows. Its columns are `article_id`, `title`, `title_source`, `url`, `source_domain`, `match_strength`, `review_bucket`, `decision`, `decision_schema_version`, `reviewed_at`, `tags`, `training_eligible`, and `exclusion_reason`. The article-quality CSV contains the same provenance column before `url`. Tags are pipe-separated. The file uses a UTF-8 byte-order mark and CRLF rows for Excel compatibility. Cells derived from publisher or reviewer data are protected against spreadsheet formula execution: dangerous leading `=`, `+`, `-`, `@`, tab, or carriage-return characters are prefixed with an apostrophe. Both training endpoints use `Cache-Control: no-store`; the CSV export does not modify review history.
 
 ### Training status
 

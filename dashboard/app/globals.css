@@ -258,6 +258,16 @@ main { min-height: 100vh; }
 .quality-review-notice span { line-height: 1.5; }
 .quality-review-notice.success { background: #e2f1ec; border-color: #8dbbad; color: #185e54; }
 .quality-review-notice.error { background: #fbe9e2; border-color: #d59b83; color: #8a351c; }
+.smart-review-banner { background: #e7efec; border: 1px solid #a9c7c1; display: grid; gap: 24px; grid-template-columns: minmax(0, 1.25fr) minmax(340px, 1fr); margin-top: 22px; padding: clamp(20px, 3vw, 28px); }
+.smart-review-banner .eyebrow { margin: 0 0 6px; }
+.smart-review-banner h3 { font-family: Georgia, serif; font-size: 1.35rem; font-weight: 500; margin: 0; }
+.smart-review-banner > div > p:not(.eyebrow) { color: #355e58; font-size: 0.68rem; line-height: 1.55; margin: 8px 0; }
+.smart-review-banner > div > small { color: #285c55; display: block; font-size: 0.61rem; font-weight: 800; line-height: 1.45; }
+.smart-review-banner dl { display: grid; gap: 1px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; }
+.smart-review-banner dl div { background: rgba(255,255,255,0.62); display: flex; flex-direction: column; min-width: 0; padding: 12px; }
+.smart-review-banner dt { color: var(--muted); font-size: 0.55rem; font-weight: 800; letter-spacing: 0.05em; text-transform: uppercase; }
+.smart-review-banner dd { font-size: 0.72rem; font-weight: 900; line-height: 1.3; margin: 5px 0 0; overflow-wrap: anywhere; }
+.smart-review-banner dl small { color: var(--muted); font-size: 0.56rem; margin-top: 3px; }
 .quality-queue-toolbar { align-items: center; border-bottom: 1px solid var(--line); display: flex; gap: 24px; justify-content: space-between; margin-top: 22px; padding: 0 0 12px; }
 .quality-queue-toolbar p { align-items: baseline; display: flex; gap: 8px; margin: 0; }
 .quality-queue-toolbar p strong { color: var(--orange); font-family: Georgia, serif; font-size: 1.65rem; font-weight: 500; }
@@ -271,6 +281,12 @@ main { min-height: 100vh; }
 .article-quality-card.legacy-review { border-color: #b89551; }
 .article-quality-card header { align-items: center; display: flex; gap: 12px; justify-content: space-between; }
 .article-quality-card .decision-chip { line-height: 1.3; text-align: right; white-space: normal; }
+.article-selection-intent { align-items: center; border-bottom: 1px solid #d8dfda; display: flex; flex-wrap: wrap; gap: 6px; margin-top: 13px; padding-bottom: 11px; }
+.article-selection-intent .selection-rank { color: var(--orange); font-size: 0.56rem; font-weight: 900; letter-spacing: 0.05em; text-transform: uppercase; }
+.article-selection-intent > strong { color: #285c55; flex: 1 0 100%; font-size: 0.62rem; line-height: 1.4; }
+.article-selection-intent > em { color: var(--muted); font-size: 0.54rem; font-style: normal; font-weight: 800; text-transform: uppercase; }
+.selection-reasons { display: flex; flex-wrap: wrap; gap: 5px; }
+.selection-reasons i { background: #e7efec; color: #285c55; font-size: 0.52rem; font-style: normal; font-weight: 800; padding: 5px 7px; }
 .decision-chip.reported-flooding { background: #dcece8; color: #17675c; }
 .decision-chip.flood-risk-warning { background: #f5e6d3; color: #824b13; }
 .decision-chip.heavy-rain-only { background: #e1eaf1; color: #315f85; }
@@ -656,6 +672,7 @@ footer strong { color: var(--ink); }
   .admin-forecast-grid { grid-template-columns: 1fr; }
   .admin-review-section { grid-template-columns: 1fr; }
   .admin-quality-overview { grid-template-columns: 1fr; }
+  .smart-review-banner { grid-template-columns: 1fr; }
   .article-quality-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .admin-quality-safety { grid-template-columns: 1fr; }
   .admin-quality-safety small { text-align: left; }
@@ -771,6 +788,7 @@ footer strong { color: var(--ink); }
   .quality-review-notice { bottom: 12px; left: 4vw; max-width: none; right: 4vw; }
   .quality-queue-toolbar { align-items: stretch; flex-direction: column; gap: 10px; }
   .quality-queue-toolbar button { width: 100%; }
+  .smart-review-banner dl { grid-template-columns: 1fr; }
   .article-training-heading { align-items: stretch; flex-direction: column; gap: 14px; }
   .article-training-counts { grid-template-columns: 1fr; }
   .admin-check-button { min-height: 44px; }

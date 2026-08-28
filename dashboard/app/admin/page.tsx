@@ -271,6 +271,28 @@ const messages = defineMessages({
   safeByDesign: "Safe by design.",
   safetyDescription: "Review decisions are append-only. This page cannot delete data, restart services, change billing, or issue an emergency warning.",
   sampleDetails: "Sampled: {sampled} {articleUnit} from {archived} permanently archived {recordUnit} on {date}.",
+  smartQueueEyebrow: "Smart review order",
+  smartQueueHeading: "Why these articles are first",
+  smartQueueDescription: "Unfinished cards stay stable; completed cards leave and fresh gap-targeted cards can fill their places. The pending queue is ordered around the current CPU smoke-test gaps in label balance, time, publishers, inference-ready text, and chronological splits.",
+  smartQueueHint: "The queue explains why an article was selected, but never reveals or suggests an answer. Review the publisher evidence independently.",
+  smartQueueUnavailable: "Readiness details are unavailable, so the queue is using its deterministic balanced order.",
+  smartQueueReviewedRows: "Usable reviewed rows",
+  smartQueueArticleDates: "Article dates",
+  smartQueuePublishers: "Publisher groups",
+  smartQueueInferenceText: "Inference-ready text",
+  samplingHint: "Coverage priority",
+  samplingWindow: "{window} window",
+  trainingWindow: "Training",
+  validationWindow: "Validation",
+  testWindow: "Final test",
+  samplingRank: "Priority {rank}",
+  reasonUnderrepresentedClass: "Class gap",
+  reasonUnderrepresentedSplit: "Split gap",
+  reasonNewArticleDate: "New date",
+  reasonNewPublisherGroup: "New publisher",
+  reasonInferenceTextAvailable: "Inference text ready",
+  reasonNeedsDetailedRelabel: "Detailed re-label",
+  reasonBalancedFallback: "Balanced fallback",
   article: "article",
   articles: "articles",
   record: "record",
@@ -542,6 +564,28 @@ const messages = defineMessages({
   safeByDesign: "Seguro por diseño.",
   safetyDescription: "Las decisiones de revisión son de solo anexado. Esta página no puede eliminar datos, reiniciar servicios, cambiar la facturación ni emitir una alerta de emergencia.",
   sampleDetails: "Muestra: {sampled} {articleUnit} de {archived} {recordUnit} del archivo permanente el {date}.",
+  smartQueueEyebrow: "Orden de revisión inteligente",
+  smartQueueHeading: "Por qué estos artículos aparecen primero",
+  smartQueueDescription: "Las tarjetas sin terminar permanecen estables; las completadas salen y nuevas tarjetas dirigidas a las brechas pueden ocupar su lugar. La cola pendiente se ordena según las brechas actuales de la prueba breve de CPU: equilibrio de etiquetas, fechas, editores, texto de inferencia y particiones cronológicas.",
+  smartQueueHint: "La cola explica por qué se seleccionó un artículo, pero nunca revela ni sugiere una respuesta. Revise la evidencia del editor de forma independiente.",
+  smartQueueUnavailable: "Los detalles de preparación no están disponibles, por lo que la cola usa su orden equilibrado y determinista.",
+  smartQueueReviewedRows: "Filas revisadas utilizables",
+  smartQueueArticleDates: "Fechas de artículos",
+  smartQueuePublishers: "Grupos de editores",
+  smartQueueInferenceText: "Texto listo para inferencia",
+  samplingHint: "Prioridad de cobertura",
+  samplingWindow: "Ventana de {window}",
+  trainingWindow: "entrenamiento",
+  validationWindow: "validación",
+  testWindow: "prueba final",
+  samplingRank: "Prioridad {rank}",
+  reasonUnderrepresentedClass: "Brecha de clase",
+  reasonUnderrepresentedSplit: "Brecha de partición",
+  reasonNewArticleDate: "Fecha nueva",
+  reasonNewPublisherGroup: "Editor nuevo",
+  reasonInferenceTextAvailable: "Texto de inferencia listo",
+  reasonNeedsDetailedRelabel: "Reetiquetado detallado",
+  reasonBalancedFallback: "Respaldo equilibrado",
   article: "artículo",
   articles: "artículos",
   record: "registro",
@@ -551,8 +595,47 @@ const messages = defineMessages({
 
 type DashboardData = typeof bundledDashboardData;
 type ArticleDecision = "reported_flooding" | "flood_risk_warning" | "heavy_rain_only" | "not_flood_related" | "uncertain";
+type ResolvedArticleDecision = Exclude<ArticleDecision, "uncertain">;
 type LegacyArticleDecision = "relevant" | "not_relevant";
 type QualityArticleDecision = ArticleDecision | LegacyArticleDecision;
+type QualitySelectionReason =
+  | "underrepresented_class"
+  | "underrepresented_split"
+  | "new_article_date"
+  | "new_publisher_group"
+  | "inference_text_available"
+  | "needs_detailed_relabel"
+  | "balanced_fallback";
+type QualityArticleSelectionIntent = {
+  rank: number;
+  sampling_split?: "training" | "validation" | "test";
+  reasons: QualitySelectionReason[];
+};
+type QualityQueueSelectionIntent = {
+  strategy: "training_readiness_v1";
+  target: "cpu_smoke";
+  usable_rows: number;
+  usable_rows_minimum: number;
+  class_counts: Record<ResolvedArticleDecision, number>;
+  class_minimum: number;
+  distinct_article_dates: number;
+  article_date_minimum: number;
+  publisher_groups: number;
+  publisher_group_minimum: number;
+  inference_text_coverage: number;
+  inference_text_minimum: number;
+  split_class_counts: Partial<Record<"training" | "validation" | "test", Record<ResolvedArticleDecision, number>>>;
+  split_class_minimums: Record<"training" | "validation" | "test", number>;
+  readiness_status: "computed" | "unavailable";
+  production_minimums?: {
+    total_usable_rows: number;
+    class_minimum: number;
+    article_dates: number;
+    publisher_groups: number;
+    inference_text_coverage: number;
+    split_class_minimums: Record<"training" | "validation" | "test", number>;
+  };
+};
 type QualityArticle = {
   article_id: string;
   seen_at: string;
@@ -570,12 +653,15 @@ type QualityArticle = {
   decision?: QualityArticleDecision;
   decision_schema_version?: number;
   reviewed_at?: string;
+  selection_intent?: QualityArticleSelectionIntent;
 };
 type QualitySample = {
   version: number;
   sample_date: string;
   archive_articles: number;
   eligible_articles: number;
+  queue_candidate_articles?: number;
+  selection_intent?: QualityQueueSelectionIntent;
   articles: QualityArticle[];
 };
 type ArticleQualitySummary = {
@@ -819,6 +905,20 @@ const reviewBucketMetadata: Record<QualityArticle["review_bucket"], { labelKey: 
   headline_conflict: { labelKey: "headlineConflict", reasonKey: "conflictReason" },
   ambiguous_match: { labelKey: "ambiguousMatch", reasonKey: "ambiguousReason" },
 };
+const qualitySelectionReasonMessageKeys: Record<QualitySelectionReason, MessageKey> = {
+  underrepresented_class: "reasonUnderrepresentedClass",
+  underrepresented_split: "reasonUnderrepresentedSplit",
+  new_article_date: "reasonNewArticleDate",
+  new_publisher_group: "reasonNewPublisherGroup",
+  inference_text_available: "reasonInferenceTextAvailable",
+  needs_detailed_relabel: "reasonNeedsDetailedRelabel",
+  balanced_fallback: "reasonBalancedFallback",
+};
+const samplingSplitMessageKeys: Record<NonNullable<QualityArticleSelectionIntent["sampling_split"]>, MessageKey> = {
+  training: "trainingWindow",
+  validation: "validationWindow",
+  test: "testWindow",
+};
 const titleSourceMessageKeys: Record<NonNullable<QualityArticle["title_source"]>, MessageKey> = {
   manual_override: "manualTitle",
   publisher_metadata: "publisherTitle",
@@ -892,11 +992,30 @@ export default function AdminPage() {
   const qualityGridRef = useRef<HTMLDivElement>(null);
   const qualityNoticeRef = useRef<HTMLParagraphElement>(null);
   const { snapshot, forecast } = dashboardData;
-  const pendingQualityArticles = qualitySample?.articles.filter((article) => !hasDetailedArticleReview(article)) ?? [];
+  const queueSelectionIntent = qualitySample?.selection_intent?.strategy === "training_readiness_v1"
+    ? qualitySample.selection_intent
+    : null;
+  const pendingQualityArticles = (qualitySample?.articles ?? [])
+    .filter((article) => !hasDetailedArticleReview(article))
+    .slice()
+    .sort((left, right) => {
+      const leftSelectionRank = left.selection_intent?.rank;
+      const rightSelectionRank = right.selection_intent?.rank;
+      const leftRank = typeof leftSelectionRank === "number" && Number.isSafeInteger(leftSelectionRank)
+        ? leftSelectionRank
+        : Number.MAX_SAFE_INTEGER;
+      const rightRank = typeof rightSelectionRank === "number" && Number.isSafeInteger(rightSelectionRank)
+        ? rightSelectionRank
+        : Number.MAX_SAFE_INTEGER;
+      return leftRank - rightRank;
+    });
   const reviewedQualityArticles = qualitySample?.articles.filter(hasDetailedArticleReview) ?? [];
   const visibleQualityArticles = showReviewedArticles
     ? qualitySample?.articles ?? []
     : pendingQualityArticles;
+  const qualityQueueComplete = Boolean(
+    qualitySample && qualitySample.version >= 2 && qualitySample.articles.length === 0,
+  );
 
   useEffect(() => {
     document.title = pageMessages.documentTitle;
@@ -1133,6 +1252,7 @@ export default function AdminPage() {
   const qualityProgress = minimumReviews > 0
     ? Math.min(100, (resolvedReviews / minimumReviews) * 100)
     : 0;
+  const queueReadinessComputed = queueSelectionIntent?.readiness_status === "computed";
   const liveAdminStatus = adminStatusAvailability === "ready" ? adminStatus : null;
   const soak = liveAdminStatus?.refresh.soak ?? null;
   const backup = liveAdminStatus?.backup ?? null;
@@ -1578,6 +1698,37 @@ export default function AdminPage() {
           </p>
         ) : null}
 
+        {queueSelectionIntent ? (
+          <aside className="smart-review-banner" aria-labelledby="smart-review-heading">
+            <div>
+              <p className="eyebrow">{t("smartQueueEyebrow")}</p>
+              <h3 id="smart-review-heading">{t("smartQueueHeading")}</h3>
+              <p>{queueReadinessComputed ? t("smartQueueDescription") : t("smartQueueUnavailable")}</p>
+              <small>{t("smartQueueHint")}</small>
+            </div>
+            {queueReadinessComputed ? (
+              <dl>
+                <div>
+                  <dt>{t("smartQueueReviewedRows")}</dt>
+                  <dd>{formatNumber(queueSelectionIntent.usable_rows, localeTag)} / {formatNumber(queueSelectionIntent.usable_rows_minimum, localeTag)}</dd>
+                </div>
+                <div>
+                  <dt>{t("smartQueueArticleDates")}</dt>
+                  <dd>{formatNumber(queueSelectionIntent.distinct_article_dates, localeTag)} / {formatNumber(queueSelectionIntent.article_date_minimum, localeTag)}</dd>
+                </div>
+                <div>
+                  <dt>{t("smartQueuePublishers")}</dt>
+                  <dd>{formatNumber(queueSelectionIntent.publisher_groups, localeTag)} / {formatNumber(queueSelectionIntent.publisher_group_minimum, localeTag)}</dd>
+                </div>
+                <div>
+                  <dt>{t("smartQueueInferenceText")}</dt>
+                  <dd>{formatPercent(queueSelectionIntent.inference_text_coverage, localeTag)} / {formatPercent(queueSelectionIntent.inference_text_minimum, localeTag)}</dd>
+                </div>
+              </dl>
+            ) : null}
+          </aside>
+        ) : null}
+
         {qualitySample?.articles?.length ? (
           <div className="quality-queue-toolbar">
             <p><strong>{formatNumber(pendingQualityArticles.length, localeTag)}</strong><span>{pendingQualityArticles.length === 1 ? t("oneNeedsReview") : t("manyNeedReview")}</span></p>
@@ -1604,6 +1755,7 @@ export default function AdminPage() {
               const bucket = reviewBucketMetadata[article.review_bucket];
               const decisionStatus = getArticleDecisionStatus(article, isSaving);
               const titleSourceKey = getTitleSourceMessageKey(article.title_source);
+              const selectionIntent = article.selection_intent;
               const currentTags = getArticleTagDraft(article);
               const tagInput = articleTagInputs[article.article_id] ?? "";
               const normalizedTagInput = normalizeArticleContextTag(tagInput);
@@ -1627,6 +1779,20 @@ export default function AdminPage() {
                       {t(decisionStatus.labelKey)}
                     </span>
                   </header>
+                  {selectionIntent ? (
+                    <div className="article-selection-intent">
+                      <span className="selection-rank">{t("samplingRank", { rank: selectionIntent.rank })}</span>
+                      <strong>{t("samplingHint")}</strong>
+                      {selectionIntent.sampling_split ? (
+                        <em>{t("samplingWindow", { window: t(samplingSplitMessageKeys[selectionIntent.sampling_split]) })}</em>
+                      ) : null}
+                      <span className="selection-reasons">
+                        {selectionIntent.reasons.map((reason) => (
+                          <i key={reason}>{t(qualitySelectionReasonMessageKeys[reason])}</i>
+                        ))}
+                      </span>
+                    </div>
+                  ) : null}
                   {link ? <a className="article-quality-title" href={link} rel="noopener noreferrer" target="_blank">{article.title} <span aria-hidden="true">↗</span></a> : <strong className="article-quality-title">{article.title}</strong>}
                   <small className={`article-title-source ${article.title_source ?? "legacy"}`}>
                     {t(titleSourceKey)}
@@ -1738,7 +1904,7 @@ export default function AdminPage() {
               );
             })}
           </div>
-        ) : qualitySample?.articles?.length ? (
+        ) : qualitySample?.articles?.length || qualityQueueComplete ? (
           <div className="admin-surface quality-all-reviewed">
             <span aria-hidden="true">✓</span>
             <div><strong>{t("queueClear")}</strong><p>{t("queueClearHelp")}</p></div>

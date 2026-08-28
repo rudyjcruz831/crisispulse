@@ -29,13 +29,16 @@ Collected articles are not automatically labels. The permanent archive can conta
 These are conservative engineering gates for starting experiments, not guarantees of model quality:
 
 - Preliminary filter measurement: 20 resolved version 2 decisions, with at least five strong and five blocked examples. This unlocks only the two filter-rate estimates; it is not model-training readiness.
+- Non-evaluative CPU smoke test: at least 16 usable decisions, at least four examples in each resolved class, at least three article dates, at least 12 publisher groups, 100% live-compatible inference text, and—after leakage purging—at least two training and one validation and test example per class. Passing this gate only proves that the complete local training pipeline can run; its metrics are too small for a product claim.
 - First CPU experiment: at least 500 eligible decisions, at least 100 examples in each resolved class, at least 30 distinct article dates, at least 100 publisher groups, and at least 95% coverage by text that will also exist at live inference.
 - Post-split CPU check: after publisher and syndicated-story purging, training retains at least 60 examples per class, validation at least 15 per class, and final test at least 20 per class.
 - First local GPU experiment: at least 2,000 eligible decisions, at least 300 examples per class, at least 60 article dates, at least 250 publisher groups, and at least 95% feature parity, after the CPU baseline and holdout pipeline work correctly.
 - Label-quality GPU check: at least 200 double-reviewed examples, at least 25 per class, and adjudicated Cohen's kappa of at least 0.75.
 - Evidence check: the CPU model improves macro-F1 over the frozen deterministic baseline by at least 0.05, with the publisher/story-cluster bootstrap 95% confidence interval for the gain above zero.
 
-The current review schema cannot yet compute article-date coverage, normalized publisher groups, inference-text coverage, split viability, reviewer agreement, or the evidence check. Those values must remain **not computable** until an audited importer supplies them; label totals alone must never turn the overall readiness status green.
+The native baseline audit now joins the latest labels to the permanent archive and computes article-date coverage, normalized publisher groups, live-compatible inference-text coverage, and the leakage-safe chronological split. Reviewer agreement remains not computable until double-review data exists, and model-improvement evidence remains not computable until an eligible fit and untouched evaluation run complete. Label totals alone never turn the overall readiness status green.
+
+The Smart Review Queue uses these audited gaps to choose what a person should inspect next. It exposes only neutral coverage reasons and an estimated split; the internal class-balancing guess is never shown or returned, so the reviewer makes every label independently. The final chronological split is recomputed after labels change.
 
 The current development workstation was verified on 2026-08-25 with an NVIDIA GeForce RTX 4070, 12,282 MiB of VRAM, compute capability 8.9, and a CUDA-capable driver. That is sufficient for a modest local text model or parameter-efficient fine-tuning experiment. GPU availability does not compensate for missing or biased labels.
 

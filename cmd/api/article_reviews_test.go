@@ -53,14 +53,99 @@ const testQualitySample = `{
   ]
 }`
 
+const testSmartQualitySample = `{
+  "version": 2,
+  "sample_date": "2026-08-28",
+  "archive_articles": 31700,
+  "eligible_articles": 20449,
+  "queue_candidate_articles": 20385,
+  "selection_intent": {
+    "strategy": "training_readiness_v1",
+    "target": "cpu_smoke",
+    "usable_rows": 62,
+    "usable_rows_minimum": 16,
+    "class_counts": {
+      "reported_flooding": 25,
+      "flood_risk_warning": 4,
+      "heavy_rain_only": 3,
+      "not_flood_related": 30
+    },
+    "class_minimum": 4,
+    "distinct_article_dates": 9,
+    "article_date_minimum": 3,
+    "publisher_groups": 59,
+    "publisher_group_minimum": 12,
+    "inference_text_coverage": 0.96875,
+    "inference_text_minimum": 1.0,
+    "split_class_counts": {
+      "training": {"reported_flooding": 18, "flood_risk_warning": 4, "heavy_rain_only": 2, "not_flood_related": 19},
+      "validation": {"reported_flooding": 3, "flood_risk_warning": 0, "heavy_rain_only": 0, "not_flood_related": 6},
+      "test": {"reported_flooding": 4, "flood_risk_warning": 0, "heavy_rain_only": 1, "not_flood_related": 4}
+    },
+    "split_class_minimums": {"training": 2, "validation": 1, "test": 1},
+    "readiness_status": "computed",
+    "production_minimums": {
+      "total_usable_rows": 500,
+      "class_minimum": 100,
+      "article_dates": 30,
+      "publisher_groups": 100,
+      "inference_text_coverage": 0.95,
+      "split_class_minimums": {"training": 60, "validation": 15, "test": 20}
+    }
+  },
+  "articles": [
+    {
+      "article_id": "0000000000000000000000000000000000000000000000000000000000000000",
+      "seen_at": "2026-08-28T10:00:00Z",
+      "title": "Heavy rain closes roads across the county",
+      "title_source": "publisher_metadata",
+      "url": "https://news.example/heavy-rain-closes-roads",
+      "source_domain": "news.example",
+      "location_name": "New Jersey",
+      "match_strength": "weak",
+      "review_bucket": "ambiguous_match",
+      "review_reason": "Ambiguous flood tag; retained for audit but blocked from alerts",
+      "themes": ["NATURAL_DISASTER_FLOODING"],
+      "quality_flags": [],
+      "selection_intent": {
+        "rank": 1,
+        "sampling_split": "validation",
+        "reasons": ["underrepresented_class", "underrepresented_split", "inference_text_available"]
+      }
+    },
+    {
+      "article_id": "1111111111111111111111111111111111111111111111111111111111111111",
+      "seen_at": "2026-08-28T11:00:00Z",
+      "title": "Flood watch issued for the weekend",
+      "title_source": "url_path",
+      "url": "https://weather.example/flood-watch-weekend",
+      "source_domain": "weather.example",
+      "location_name": "Pennsylvania",
+      "match_strength": "high",
+      "review_bucket": "high_match",
+      "review_reason": "Explicit flood theme; allowed to contribute to alerts",
+      "themes": ["NATURAL_DISASTER_FLOODING"],
+      "quality_flags": [],
+      "selection_intent": {
+        "rank": 2,
+        "reasons": ["underrepresented_split", "new_publisher_group"]
+      }
+    }
+  ]
+}`
+
 func testQualityHandlerWithReviewPath(t *testing.T) (http.Handler, string) {
+	return testQualityHandlerWithSample(t, testQualitySample)
+}
+
+func testQualityHandlerWithSample(t *testing.T, sample string) (http.Handler, string) {
 	t.Helper()
 	root := t.TempDir()
 	dataPath := filepath.Join(root, "dashboard.json")
 	if err := os.WriteFile(dataPath, []byte(testDashboard), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "quality-review-sample.json"), []byte(testQualitySample), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "quality-review-sample.json"), []byte(sample), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	reviewPath := filepath.Join(root, "reviews.jsonl")
@@ -108,6 +193,9 @@ func TestQualityArticleReviewNormalizesDeduplicatesAndPersistsTags(t *testing.T)
 	if got := strings.Join(result.Review.Tags, ","); got != wantTags {
 		t.Fatalf("response tags = %q, want %q", got, wantTags)
 	}
+	if result.Review.TitleSource != "manual_override" {
+		t.Fatalf("response title source = %q", result.Review.TitleSource)
+	}
 
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/quality/articles", nil)
 	listResponse := httptest.NewRecorder()
@@ -154,6 +242,62 @@ func TestQualityArticleReviewFlow(t *testing.T) {
 	}
 	if summary.TotalReviews != 1 || summary.ResolvedReviews != 1 || summary.ReportedFloodingArticles != 1 || summary.HighFloodRelated != 1 || summary.Status != "collecting_labels" {
 		t.Fatalf("summary = %+v", summary)
+	}
+}
+
+func TestQualityArticleReviewFlowPreservesSmartQueueIntent(t *testing.T) {
+	handler, _ := testQualityHandlerWithSample(t, testSmartQualitySample)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/quality/articles", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var sample qualitySampleFile
+	if err := json.Unmarshal(response.Body.Bytes(), &sample); err != nil {
+		t.Fatal(err)
+	}
+	if sample.Version != 2 || sample.SelectionIntent == nil || sample.SelectionIntent.Target != "cpu_smoke" || sample.SelectionIntent.UsableRows != 62 {
+		t.Fatalf("selection intent = %+v", sample.SelectionIntent)
+	}
+	if len(sample.Articles) != 2 || sample.Articles[0].SelectionIntent == nil || sample.Articles[0].SelectionIntent.Rank != 1 || sample.Articles[0].SelectionIntent.SamplingSplit != "validation" {
+		t.Fatalf("smart queue articles = %+v", sample.Articles)
+	}
+
+	postResponse := postQualityDecision(t, handler, strings.Repeat("0", 64), "heavy_rain_only")
+	if postResponse.Code != http.StatusCreated {
+		t.Fatalf("post status = %d, body = %s", postResponse.Code, postResponse.Body.String())
+	}
+}
+
+func TestQualityArticleReviewTreatsCompletedSmartQueueAsHealthy(t *testing.T) {
+	var sample qualitySampleFile
+	if err := json.Unmarshal([]byte(testSmartQualitySample), &sample); err != nil {
+		t.Fatal(err)
+	}
+	sample.Articles = []qualityArticle{}
+	sample.QueueCandidateArticles = 0
+	encoded, err := json.Marshal(sample)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, _ := testQualityHandlerWithSample(t, string(encoded))
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/quality/articles", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"articles":[]`) {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+}
+
+func TestQualityArticleReviewRejectsInvalidSmartQueueRank(t *testing.T) {
+	invalid := strings.Replace(testSmartQualitySample, `"rank": 2`, `"rank": 1`, 1)
+	handler, _ := testQualityHandlerWithSample(t, invalid)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/quality/articles", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
 	}
 }
 
@@ -280,6 +424,7 @@ func TestArticleReviewCorrectionAppendsAuditAndLatestIsSchemaV2(t *testing.T) {
 	article := qualityArticle{
 		ArticleID:     strings.Repeat("0", 64),
 		Title:         "Corrected flood-risk label",
+		TitleSource:   "publisher_metadata",
 		URL:           "https://news.example/legacy-flood",
 		SourceDomain:  "news.example",
 		MatchStrength: "high",
@@ -296,14 +441,14 @@ func TestArticleReviewCorrectionAppendsAuditAndLatestIsSchemaV2(t *testing.T) {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
-	if len(lines) != 3 || !strings.Contains(lines[0], `"decision":"relevant"`) || !strings.Contains(lines[1], `"tags":["hawaii-rain","fatality"]`) || !strings.Contains(lines[2], `"tags":["fatality","flash-flood"]`) {
+	if len(lines) != 3 || !strings.Contains(lines[0], `"decision":"relevant"`) || !strings.Contains(lines[1], `"title_source":"publisher_metadata"`) || !strings.Contains(lines[1], `"tags":["hawaii-rain","fatality"]`) || !strings.Contains(lines[2], `"tags":["fatality","flash-flood"]`) {
 		t.Fatalf("audit log = %s", raw)
 	}
 	reviews, err := store.list()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(reviews) != 1 || reviews[0].Decision != "reported_flooding" || reviews[0].DecisionSchemaVersion != 2 || strings.Join(reviews[0].Tags, ",") != "fatality,flash-flood" {
+	if len(reviews) != 1 || reviews[0].Decision != "reported_flooding" || reviews[0].DecisionSchemaVersion != 2 || reviews[0].TitleSource != "publisher_metadata" || strings.Join(reviews[0].Tags, ",") != "fatality,flash-flood" {
 		t.Fatalf("latest reviews = %+v", reviews)
 	}
 }
@@ -341,6 +486,18 @@ func TestStoredArticleReviewRequiresCanonicalSchemaV2Tags(t *testing.T) {
 	if err := validateStoredArticleReview(base); err != nil {
 		t.Fatalf("canonical v2 tags rejected: %v", err)
 	}
+	for _, source := range []string{"manual_override", "publisher_metadata", "url_path", "unavailable"} {
+		record := base
+		record.TitleSource = source
+		if err := validateStoredArticleReview(record); err != nil {
+			t.Fatalf("valid title source %q rejected: %v", source, err)
+		}
+	}
+	base.TitleSource = "browser_supplied"
+	if err := validateStoredArticleReview(base); err == nil {
+		t.Fatal("invalid title source was accepted")
+	}
+	base.TitleSource = ""
 	base.DecisionSchemaVersion = 1
 	base.Decision = "relevant"
 	if err := validateStoredArticleReview(base); err == nil {
@@ -414,7 +571,7 @@ func TestArticleQualityCSVExportIncludesDecisionSchemaVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) != 2 || len(rows[0]) != 10 || rows[0][7] != "decision_schema_version" || rows[0][9] != "tags" || rows[1][6] != "heavy_rain_only" || rows[1][7] != "2" || rows[1][9] != "storm-damage|hawaii-flood" {
+	if len(rows) != 2 || len(rows[0]) != 11 || rows[0][2] != "title_source" || rows[0][8] != "decision_schema_version" || rows[0][10] != "tags" || rows[1][2] != "manual_override" || rows[1][7] != "heavy_rain_only" || rows[1][8] != "2" || rows[1][10] != "storm-damage|hawaii-flood" {
 		t.Fatalf("CSV rows = %#v", rows)
 	}
 }
@@ -458,6 +615,7 @@ func TestTrainingArticlesReturnsLatestLabelsWithEligibilitySummary(t *testing.T)
 		trainingReviewFixture("5", "relevant", 1, "2026-08-24T15:00:00Z"),
 	}
 	reviews[0].Tags = []string{"flash-flood", "fatality"}
+	reviews[0].TitleSource = "publisher_metadata"
 	writeTrainingReviewFixtures(t, reviewPath, reviews)
 
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/training/articles", nil)
@@ -508,6 +666,9 @@ func TestTrainingArticlesReturnsLatestLabelsWithEligibilitySummary(t *testing.T)
 	}
 	if got := strings.Join(byDecision["reported_flooding"].Tags, ","); got != "flash-flood,fatality" {
 		t.Fatalf("eligible tags = %q", got)
+	}
+	if got := byDecision["reported_flooding"].TitleSource; got != "publisher_metadata" {
+		t.Fatalf("eligible title source = %q", got)
 	}
 }
 
@@ -571,6 +732,7 @@ func TestTrainingArticleCSVIsExcelCompatibleAudit(t *testing.T) {
 	eligible := trainingReviewFixture("0", "reported_flooding", articleDecisionSchemaV2, "2026-08-24T10:00:00Z")
 	eligible.Title = `=HYPERLINK("https://malicious.example","click")`
 	eligible.SourceDomain = "\tnews.example"
+	eligible.TitleSource = "publisher_metadata"
 	eligible.Tags = []string{"flash-flood", "fatality"}
 	legacy := trainingReviewFixture("1", "not_relevant", 1, "2026-08-24T11:00:00Z")
 	writeTrainingReviewFixtures(t, reviewPath, []articleReviewRecord{eligible, legacy})
@@ -592,17 +754,17 @@ func TestTrainingArticleCSVIsExcelCompatibleAudit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) != 3 || len(rows[0]) != 12 || rows[0][10] != "training_eligible" || rows[0][11] != "exclusion_reason" {
+	if len(rows) != 3 || len(rows[0]) != 13 || rows[0][2] != "title_source" || rows[0][11] != "training_eligible" || rows[0][12] != "exclusion_reason" {
 		t.Fatalf("CSV rows = %#v", rows)
 	}
 	byDecision := make(map[string][]string, 2)
 	for _, row := range rows[1:] {
-		byDecision[row[6]] = row
+		byDecision[row[7]] = row
 	}
-	if row := byDecision["reported_flooding"]; row[1] != `'=HYPERLINK("https://malicious.example","click")` || row[3] != "'\tnews.example" || row[9] != "flash-flood|fatality" || row[10] != "true" || row[11] != "" {
+	if row := byDecision["reported_flooding"]; row[1] != `'=HYPERLINK("https://malicious.example","click")` || row[2] != "publisher_metadata" || row[4] != "'\tnews.example" || row[10] != "flash-flood|fatality" || row[11] != "true" || row[12] != "" {
 		t.Fatalf("eligible CSV row = %#v", row)
 	}
-	if row := byDecision["not_relevant"]; row[10] != "false" || row[11] != "legacy_schema" {
+	if row := byDecision["not_relevant"]; row[11] != "false" || row[12] != "legacy_schema" {
 		t.Fatalf("legacy CSV row = %#v", row)
 	}
 }

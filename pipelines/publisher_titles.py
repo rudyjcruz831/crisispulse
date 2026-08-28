@@ -38,7 +38,7 @@ MAX_CACHE_ENTRIES = 2048
 FETCH_TIMEOUT_SECONDS = 4
 SUCCESS_TTL = timedelta(days=30)
 MISS_TTL = timedelta(hours=6)
-TITLE_PARSER_VERSION = 4
+TITLE_PARSER_VERSION = 5
 MAX_JSON_LD_BYTES = 128 * 1024
 MAX_JSON_LD_NODES = 256
 GENERIC_PUBLISHER_TITLES = {
@@ -362,6 +362,8 @@ def normalize_publisher_title(
         "attention required! | cloudflare",
         "error",
         "home",
+        "javascript disabled",
+        "javascript is disabled",
         "just a moment...",
         "page not found",
         "request unsuccessful",
@@ -390,10 +392,15 @@ def normalize_publisher_title(
         (
             "access restricted",
             "content unavailable",
+            "enable javascript",
+            "javascript disabled",
+            "javascript is disabled",
             "page unavailable",
             "please enable javascript",
             "please wait",
+            "this site requires javascript",
             "temporarily unavailable",
+            "you need to enable javascript",
         )
     ):
         return None

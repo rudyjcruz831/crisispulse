@@ -152,6 +152,110 @@ def test_readiness_uses_latest_decision_and_reports_every_exclusion(tmp_path: Pa
     assert report["geography_summary"]["mappable_rows"] == 0
 
 
+def test_readiness_uses_exactly_bound_publisher_metadata_from_review(
+    tmp_path: Path,
+) -> None:
+    reviews_path = tmp_path / "article-reviews.jsonl"
+    archive_path = tmp_path / "articles.parquet"
+    now = datetime(2026, 8, 25, tzinfo=UTC)
+    article_id = _article_id("review-publisher-title")
+    opaque_url = "https://www.publisher.example/articles/20260825/4488671.html"
+    review = _review(article_id, "flood_risk_warning", now)
+    review.update(
+        title="Publisher headline available at live inference",
+        title_source="publisher_metadata",
+        url=opaque_url,
+        source_domain="www.publisher.example",
+    )
+    _write_reviews(reviews_path, [review])
+    _write_archive(
+        archive_path,
+        [{
+            "article_id": article_id,
+            "seen_at": now,
+            "canonical_url": opaque_url,
+            "source_domain": "publisher.example",
+            "duplicate_group_id": "story-publisher-title",
+            "publisher_title": None,
+        }],
+    )
+
+    report, prepared, _split = build_readiness_report(reviews_path, archive_path)
+
+    assert report["exclusion_counts"] == {}
+    assert len(prepared.rows) == 1
+    assert prepared.rows[0].text == "Publisher headline available at live inference"
+    assert prepared.rows[0].text_source == "review_publisher_metadata"
+    assert prepared.safeguards[
+        "review_publisher_titles_require_exact_archive_url_and_domain"
+    ] is True
+    assert prepared.safeguards["unproven_review_titles_used"] is False
+
+
+@pytest.mark.parametrize(
+    ("title_source", "review_url", "review_domain"),
+    [
+        (None, "same", "same"),
+        ("", "same", "same"),
+        ("manual_override", "same", "same"),
+        ("unavailable", "same", "same"),
+        ("url_path", "same", "same"),
+        ("publisher_metadata", "different", "same"),
+        ("publisher_metadata", "same", "different"),
+    ],
+)
+def test_readiness_rejects_unproven_or_unbound_review_display_text(
+    tmp_path: Path,
+    title_source: str | None,
+    review_url: str,
+    review_domain: str,
+) -> None:
+    reviews_path = tmp_path / "article-reviews.jsonl"
+    archive_path = tmp_path / "articles.parquet"
+    now = datetime(2026, 8, 25, tzinfo=UTC)
+    article_id = _article_id(f"untrusted-{title_source}-{review_url}-{review_domain}")
+    opaque_url = "https://publisher.example/articles/20260825/4488671.html"
+    review = _review(article_id, "not_flood_related", now)
+    review["title"] = "Display text must not silently become model input"
+    review["url"] = (
+        opaque_url
+        if review_url == "same"
+        else "https://publisher.example/articles/20260825/9999999.html"
+    )
+    review["source_domain"] = (
+        "www.publisher.example" if review_domain == "same" else "other.example"
+    )
+    if title_source is not None:
+        review["title_source"] = title_source
+    _write_reviews(reviews_path, [review])
+    _write_archive(
+        archive_path,
+        [{
+            "article_id": article_id,
+            "seen_at": now,
+            "canonical_url": opaque_url,
+            "source_domain": "publisher.example",
+            "duplicate_group_id": "story-untrusted-title",
+            "publisher_title": None,
+        }],
+    )
+
+    report, prepared, _split = build_readiness_report(reviews_path, archive_path)
+
+    assert prepared.rows == []
+    assert report["exclusion_counts"] == {"missing_inference_text": 1}
+
+
+def test_native_review_loader_rejects_unknown_title_source(tmp_path: Path) -> None:
+    reviews_path = tmp_path / "article-reviews.jsonl"
+    review = _review(_article_id("bad-title-source"), "reported_flooding", datetime(2026, 8, 25, tzinfo=UTC))
+    review["title_source"] = "review_display_text"
+    _write_reviews(reviews_path, [review])
+
+    with pytest.raises(ValueError, match="invalid title_source"):
+        load_latest_native_reviews(reviews_path)
+
+
 def test_readiness_accepts_archive_without_optional_geography_columns(
     tmp_path: Path,
 ) -> None:

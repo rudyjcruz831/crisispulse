@@ -338,6 +338,43 @@ def test_backup_accepts_null_as_an_empty_v2_article_tag_list(
     assert len(list(backups.glob("crisispulse-*.tar.gz"))) == 1
 
 
+def test_backup_accepts_optional_publisher_title_provenance(tmp_path: Path) -> None:
+    state, work, backups = _source_tree(tmp_path)
+    review_path = state / "article-reviews.jsonl"
+    record = json.loads(review_path.read_text(encoding="utf-8"))
+    record["decision_schema_version"] = 2
+    record["decision"] = "reported_flooding"
+    record["title_source"] = "publisher_metadata"
+    review_path.write_text(json.dumps(record) + "\n", encoding="utf-8")
+    script = _normalized_script(BACKUP_SCRIPT, tmp_path / "backup.sh")
+
+    result = _run_alpine(script, state, work, backups)
+
+    assert result.returncode == 0, result.stderr
+    assert len(list(backups.glob("crisispulse-*.tar.gz"))) == 1
+
+
+@pytest.mark.parametrize("title_source", [None, 7, "review_display_text"])
+def test_backup_rejects_invalid_article_title_provenance(
+    tmp_path: Path,
+    title_source: object,
+) -> None:
+    state, work, backups = _source_tree(tmp_path)
+    review_path = state / "article-reviews.jsonl"
+    record = json.loads(review_path.read_text(encoding="utf-8"))
+    record["decision_schema_version"] = 2
+    record["decision"] = "reported_flooding"
+    record["title_source"] = title_source
+    review_path.write_text(json.dumps(record) + "\n", encoding="utf-8")
+    script = _normalized_script(BACKUP_SCRIPT, tmp_path / "backup.sh")
+
+    result = _run_alpine(script, state, work, backups)
+
+    assert result.returncode != 0
+    assert "invalid title_source" in result.stderr.lower()
+    assert not list(backups.glob("crisispulse-*.tar.gz"))
+
+
 def test_backup_rejects_article_label_from_the_wrong_schema_version(
     tmp_path: Path,
 ) -> None:
