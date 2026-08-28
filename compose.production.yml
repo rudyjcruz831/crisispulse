@@ -160,6 +160,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.refresh
+    # Keep refresh work responsive alongside the desktop app. This is a hard
+    # container CPU ceiling; --workers remains the pipeline concurrency knob.
+    cpus: "${CRISISPULSE_REFRESH_CPUS:-8.0}"
     command:
       - --raw-dir
       - /var/lib/crisispulse/raw

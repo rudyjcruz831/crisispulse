@@ -69,7 +69,15 @@ After the short soak test passes, install the permanent local production schedul
 powershell -ExecutionPolicy Bypass -File .\scripts\install-production-refresh-task.ps1
 ```
 
-It repeats every 15 minutes until explicitly removed, starts a missed run when Windows becomes available, skips overlap, and attempts to launch Docker Desktop when the engine is stopped. The scheduled action uses the hidden Windows Script Host launcher, so it does not flash a PowerShell or Docker terminal during normal runs. Collection occurs only while the PC is on, the user is signed in, and internet access is available; after sleep or shutdown, the next available run catches up from the newest overlap. Remove only the schedule with `scripts/uninstall-production-refresh-task.ps1`; this does not remove raw data, permanent history, reviews, or backups.
+It repeats every 15 minutes until explicitly removed, starts a missed run when Windows becomes available, skips overlap, and attempts to launch Docker Desktop when the engine is stopped. The refresh container is capped at eight CPUs by default so the browser and desktop remain responsive; change `CRISISPULSE_REFRESH_CPUS` only after measuring the effect. The scheduled action uses the hidden Windows Script Host launcher, so it does not flash a PowerShell or Docker terminal during normal runs. Collection occurs only while the PC is on, the user is signed in, and internet access is available; after sleep or shutdown, the next available run catches up from the newest overlap. Remove only the schedule with `scripts/uninstall-production-refresh-task.ps1`; this does not remove raw data, permanent history, reviews, or backups.
+
+Install the local verified daily backup schedule separately:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\install-production-backup-task.ps1
+```
+
+Its default is 07:10 UTC—3:10 AM EDT or 2:10 AM EST—between the normal 15-minute refresh boundaries. The UTC boundary keeps the schedule stable through daylight-saving and Windows time-zone changes. It starts the missed backup after the next sign-in if the PC was off, waits for any refresh to finish, excludes only re-downloadable raw ZIP files, and runs through the same hidden launcher. Remove only this schedule with `scripts/uninstall-production-backup-task.ps1`; existing backup archives are retained.
 
 ## First paid server
 
@@ -82,6 +90,7 @@ CRISISPULSE_HTTP_PORT=80
 CRISISPULSE_HTTPS_PORT=443
 CRISISPULSE_STATE_VOLUME=crisispulse_crisis_state
 CRISISPULSE_WORK_VOLUME=crisispulse_crisis_work
+CRISISPULSE_REFRESH_CPUS=0.75
 ```
 
 Point the domain to the server, allow inbound TCP ports 80 and 443, and run `sh production/deploy.sh`. Do not place card details, passwords, or the plaintext pilot password in the repository or this chat.
