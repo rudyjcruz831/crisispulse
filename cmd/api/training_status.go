@@ -22,8 +22,11 @@ const (
 	articleBaselineDatasetContract      = "crisispulse_native_article_reviews_v2"
 	maxArticleBaselineReportBytes       = 512 << 10
 	maxArticleBaselineMapLocations      = 250
+	maxArticleBaselineMistakes          = 8
+	maxArticleBaselineFeatureDimensions = 100_000
 	articleBaselineMapMeaning           = "article_mentioned_locations_not_verified_events"
 	articleBaselineMapSource            = "gdelt_primary_location_from_permanent_article_archive"
+	articleBaselineModelType            = "word_and_character_tfidf_class_balanced_logistic_regression"
 )
 
 var articleBaselineClassLabels = []string{
@@ -42,6 +45,7 @@ var articleBaselineExclusionReasons = map[string]struct{}{
 	"missing_publisher_group":     {},
 	"missing_story_group":         {},
 	"missing_inference_text":      {},
+	"headline_not_sufficient":    {},
 }
 
 type articleBaselineGate struct {
@@ -144,6 +148,87 @@ type articleBaselineReadinessSummary struct {
 	Gates []articleBaselineGate `json:"gates"`
 }
 
+type articleBaselineClassMetric struct {
+	Precision float64 `json:"precision"`
+	Recall    float64 `json:"recall"`
+	F1        float64 `json:"f1"`
+	Support   int     `json:"support"`
+}
+
+type articleBaselineEvaluation struct {
+	Accuracy                  float64                               `json:"accuracy"`
+	MacroF1                   float64                               `json:"macro_f1"`
+	PerClass                  map[string]articleBaselineClassMetric `json:"per_class"`
+	ConfusionMatrix           [][]int                               `json:"confusion_matrix"`
+	ConfusionMatrixLabelOrder []string                              `json:"confusion_matrix_label_order"`
+}
+
+type articleBaselineModelMetricsFile struct {
+	Type       string                    `json:"type"`
+	Validation articleBaselineEvaluation `json:"validation"`
+	Test       articleBaselineEvaluation `json:"test"`
+}
+
+type articleBaselineComparatorMetricsFile struct {
+	DummyPriorTest         articleBaselineEvaluation `json:"dummy_prior_test"`
+	FrozenKeywordRulesTest articleBaselineEvaluation `json:"frozen_keyword_rules_test"`
+}
+
+type articleBaselineAbstentionFile struct {
+	Threshold               float64                    `json:"threshold"`
+	AbstainedRows           int                        `json:"abstained_rows"`
+	CoveredRows             int                        `json:"covered_rows"`
+	Coverage                float64                    `json:"coverage"`
+	CoveredTestMetrics      *articleBaselineEvaluation `json:"covered_test_metrics"`
+	ThresholdWasTunedOnTest bool                       `json:"threshold_was_tuned_on_test"`
+}
+
+type articleBaselineMetricsFile struct {
+	Model             articleBaselineModelMetricsFile      `json:"model"`
+	Comparators       articleBaselineComparatorMetricsFile `json:"comparators"`
+	TestSlices        json.RawMessage                      `json:"test_slices"`
+	Abstention        articleBaselineAbstentionFile        `json:"abstention"`
+	FeatureDimensions int                                  `json:"feature_dimensions"`
+}
+
+type articleBaselineRuntimeFile struct {
+	ScikitLearnVersion string `json:"scikit_learn_version"`
+	RandomSeed         int    `json:"random_seed"`
+	ExecutionDevice    string `json:"execution_device"`
+}
+
+type articleBaselineRuntimeSummary struct {
+	ExecutionDevice string `json:"execution_device"`
+	Library         string `json:"library"`
+	LibraryVersion  string `json:"library_version"`
+	RandomSeed      int    `json:"random_seed"`
+}
+
+type articleBaselineAbstentionSummary struct {
+	Threshold               float64 `json:"threshold"`
+	AbstainedRows           int     `json:"abstained_rows"`
+	CoveredRows             int     `json:"covered_rows"`
+	Coverage                float64 `json:"coverage"`
+	ThresholdWasTunedOnTest bool    `json:"threshold_was_tuned_on_test"`
+}
+
+type articleBaselineMistakeSummary struct {
+	ActualLabel    string `json:"actual_label"`
+	PredictedLabel string `json:"predicted_label"`
+	Count          int    `json:"count"`
+}
+
+type articleBaselineResultsSummary struct {
+	ModelType              string                               `json:"model_type"`
+	FeatureDimensions      int                                  `json:"feature_dimensions"`
+	Runtime                articleBaselineRuntimeSummary        `json:"runtime"`
+	Validation             articleBaselineEvaluation            `json:"validation"`
+	Test                   articleBaselineEvaluation            `json:"test"`
+	Baselines              articleBaselineComparatorMetricsFile `json:"baselines"`
+	Abstention             articleBaselineAbstentionSummary     `json:"abstention"`
+	RepresentativeMistakes []articleBaselineMistakeSummary      `json:"representative_mistakes"`
+}
+
 type articleBaselineStatusResponse struct {
 	ReportSchemaVersion         int                              `json:"report_schema_version"`
 	Status                      string                           `json:"status"`
@@ -163,6 +248,7 @@ type articleBaselineStatusResponse struct {
 	ProductionReadiness         articleBaselineReadinessSummary  `json:"production_readiness"`
 	SmokeTestReadiness          articleBaselineReadinessSummary  `json:"smoke_test_readiness"`
 	BlockedReason               string                           `json:"blocked_reason,omitempty"`
+	Results                     *articleBaselineResultsSummary   `json:"results,omitempty"`
 }
 
 func (service *api) trainingStatus(writer http.ResponseWriter, request *http.Request) {
@@ -318,8 +404,12 @@ func sanitizeArticleBaselineReport(report articleBaselineReportFile) (articleBas
 	if err != nil {
 		return response, err
 	}
-
 	splitSummary.ClassCounts = cloneArticleBaselineSplitCounts(report.ProductionReadiness.SplitClassCounts)
+	results, err := sanitizeArticleBaselineResults(report, splitSummary)
+	if err != nil {
+		return response, err
+	}
+
 	blockedReason := report.BlockedReason
 	if report.Status == "not_ready" && blockedReason == "" {
 		blockedReason = "readiness_gates_not_met"
@@ -343,6 +433,7 @@ func sanitizeArticleBaselineReport(report articleBaselineReportFile) (articleBas
 		ProductionReadiness:         production,
 		SmokeTestReadiness:          smoke,
 		BlockedReason:               blockedReason,
+		Results:                     results,
 	}, nil
 }
 
@@ -413,6 +504,262 @@ func sanitizeArticleBaselineGeography(
 		Truncated:         geography.Truncated,
 		Locations:         locations,
 	}, nil
+}
+
+func sanitizeArticleBaselineResults(
+	report articleBaselineReportFile,
+	split articleBaselineSplitSummary,
+) (*articleBaselineResultsSummary, error) {
+	if !report.TrainingPerformed {
+		return nil, nil
+	}
+	if !split.Computable {
+		return nil, errors.New("trained article baseline report has no computable split")
+	}
+
+	var metrics articleBaselineMetricsFile
+	if err := decodeStrictArticleBaselineObject(report.Metrics, &metrics); err != nil {
+		return nil, fmt.Errorf("invalid article baseline metrics: %w", err)
+	}
+	if metrics.Model.Type != articleBaselineModelType || metrics.FeatureDimensions <= 0 || metrics.FeatureDimensions > maxArticleBaselineFeatureDimensions || !articleBaselineJSONObject(metrics.TestSlices) {
+		return nil, errors.New("invalid article baseline model metadata")
+	}
+	if err := validateArticleBaselineEvaluation(metrics.Model.Validation, split.ValidationRows, split.ClassCounts["validation"]); err != nil {
+		return nil, fmt.Errorf("invalid article baseline validation metrics: %w", err)
+	}
+	if err := validateArticleBaselineEvaluation(metrics.Model.Test, split.TestRows, split.ClassCounts["test"]); err != nil {
+		return nil, fmt.Errorf("invalid article baseline test metrics: %w", err)
+	}
+	if err := validateArticleBaselineEvaluation(metrics.Comparators.DummyPriorTest, split.TestRows, split.ClassCounts["test"]); err != nil {
+		return nil, fmt.Errorf("invalid article baseline dummy metrics: %w", err)
+	}
+	if err := validateArticleBaselineEvaluation(metrics.Comparators.FrozenKeywordRulesTest, split.TestRows, split.ClassCounts["test"]); err != nil {
+		return nil, fmt.Errorf("invalid article baseline keyword metrics: %w", err)
+	}
+	if err := validateArticleBaselineAbstention(metrics.Abstention, split.TestRows); err != nil {
+		return nil, err
+	}
+
+	var runtime articleBaselineRuntimeFile
+	if err := decodeStrictArticleBaselineObject(report.Runtime, &runtime); err != nil {
+		return nil, fmt.Errorf("invalid article baseline runtime: %w", err)
+	}
+	if runtime.ExecutionDevice != "CPU" || runtime.RandomSeed != 42 || !validArticleBaselineVersion(runtime.ScikitLearnVersion) {
+		return nil, errors.New("invalid article baseline runtime metadata")
+	}
+
+	return &articleBaselineResultsSummary{
+		ModelType:         metrics.Model.Type,
+		FeatureDimensions: metrics.FeatureDimensions,
+		Runtime: articleBaselineRuntimeSummary{
+			ExecutionDevice: runtime.ExecutionDevice,
+			Library:         "scikit-learn",
+			LibraryVersion:  runtime.ScikitLearnVersion,
+			RandomSeed:      runtime.RandomSeed,
+		},
+		Validation: cloneArticleBaselineEvaluation(metrics.Model.Validation),
+		Test:       cloneArticleBaselineEvaluation(metrics.Model.Test),
+		Baselines: articleBaselineComparatorMetricsFile{
+			DummyPriorTest:         cloneArticleBaselineEvaluation(metrics.Comparators.DummyPriorTest),
+			FrozenKeywordRulesTest: cloneArticleBaselineEvaluation(metrics.Comparators.FrozenKeywordRulesTest),
+		},
+		Abstention: articleBaselineAbstentionSummary{
+			Threshold:               metrics.Abstention.Threshold,
+			AbstainedRows:           metrics.Abstention.AbstainedRows,
+			CoveredRows:             metrics.Abstention.CoveredRows,
+			Coverage:                metrics.Abstention.Coverage,
+			ThresholdWasTunedOnTest: metrics.Abstention.ThresholdWasTunedOnTest,
+		},
+		RepresentativeMistakes: articleBaselineRepresentativeMistakes(metrics.Model.Test),
+	}, nil
+}
+
+func decodeStrictArticleBaselineObject(raw json.RawMessage, destination any) error {
+	if !articleBaselineJSONObject(raw) {
+		return errors.New("value must be a JSON object")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(destination); err != nil {
+		return errors.New("invalid JSON object")
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return errors.New("invalid trailing JSON data")
+	}
+	return nil
+}
+
+func validateArticleBaselineEvaluation(
+	evaluation articleBaselineEvaluation,
+	expectedRows int,
+	expectedClassCounts map[string]int,
+) error {
+	if expectedRows <= 0 || len(evaluation.PerClass) != len(articleBaselineClassLabels) || len(evaluation.ConfusionMatrix) != len(articleBaselineClassLabels) || len(evaluation.ConfusionMatrixLabelOrder) != len(articleBaselineClassLabels) {
+		return errors.New("evaluation dimensions do not match the four-class contract")
+	}
+	if !articleBaselineUnitInterval(evaluation.Accuracy) || !articleBaselineUnitInterval(evaluation.MacroF1) {
+		return errors.New("evaluation scores must be finite values from zero to one")
+	}
+
+	columnTotals := make([]int, len(articleBaselineClassLabels))
+	diagonal := 0
+	total := 0
+	for rowIndex, label := range articleBaselineClassLabels {
+		if evaluation.ConfusionMatrixLabelOrder[rowIndex] != label || len(evaluation.ConfusionMatrix[rowIndex]) != len(articleBaselineClassLabels) {
+			return errors.New("confusion matrix uses an invalid label order or shape")
+		}
+		metric, ok := evaluation.PerClass[label]
+		if !ok || metric.Support < 0 || !articleBaselineUnitInterval(metric.Precision) || !articleBaselineUnitInterval(metric.Recall) || !articleBaselineUnitInterval(metric.F1) {
+			return errors.New("per-class metrics are incomplete or invalid")
+		}
+		rowTotal := 0
+		for columnIndex, count := range evaluation.ConfusionMatrix[rowIndex] {
+			if count < 0 {
+				return errors.New("confusion matrix contains a negative count")
+			}
+			rowTotal += count
+			columnTotals[columnIndex] += count
+			if rowIndex == columnIndex {
+				diagonal += count
+			}
+		}
+		if rowTotal != metric.Support {
+			return errors.New("per-class support does not match confusion matrix")
+		}
+		if expectedClassCounts != nil && expectedClassCounts[label] != metric.Support {
+			return errors.New("per-class support does not match split counts")
+		}
+		total += rowTotal
+	}
+	if total != expectedRows {
+		return errors.New("evaluation row count does not match split")
+	}
+
+	macroF1 := 0.0
+	for index, label := range articleBaselineClassLabels {
+		metric := evaluation.PerClass[label]
+		truePositive := evaluation.ConfusionMatrix[index][index]
+		precision := articleBaselineRatio(truePositive, columnTotals[index])
+		recall := articleBaselineRatio(truePositive, metric.Support)
+		f1 := 0.0
+		if precision+recall > 0 {
+			f1 = 2 * precision * recall / (precision + recall)
+		}
+		if !articleBaselineRoundedEqual(metric.Precision, precision) || !articleBaselineRoundedEqual(metric.Recall, recall) || !articleBaselineRoundedEqual(metric.F1, f1) {
+			return errors.New("per-class scores do not match confusion matrix")
+		}
+		macroF1 += f1
+	}
+	if !articleBaselineRoundedEqual(evaluation.Accuracy, articleBaselineRatio(diagonal, total)) || !articleBaselineRoundedEqual(evaluation.MacroF1, macroF1/float64(len(articleBaselineClassLabels))) {
+		return errors.New("aggregate scores do not match confusion matrix")
+	}
+	return nil
+}
+
+func validateArticleBaselineAbstention(abstention articleBaselineAbstentionFile, testRows int) error {
+	if !articleBaselineUnitInterval(abstention.Threshold) || abstention.Threshold == 0 || abstention.Threshold == 1 || abstention.AbstainedRows < 0 || abstention.CoveredRows < 0 || abstention.AbstainedRows+abstention.CoveredRows != testRows || !articleBaselineUnitInterval(abstention.Coverage) || abstention.ThresholdWasTunedOnTest {
+		return errors.New("invalid article baseline abstention summary")
+	}
+	if !articleBaselineRoundedEqual(abstention.Coverage, articleBaselineRatio(abstention.CoveredRows, testRows)) {
+		return errors.New("article baseline abstention coverage is inconsistent")
+	}
+	if abstention.CoveredRows == 0 {
+		if abstention.CoveredTestMetrics != nil {
+			return errors.New("zero covered rows cannot have covered metrics")
+		}
+		return nil
+	}
+	if abstention.CoveredTestMetrics == nil {
+		return errors.New("covered rows require covered metrics")
+	}
+	if err := validateArticleBaselineEvaluation(*abstention.CoveredTestMetrics, abstention.CoveredRows, nil); err != nil {
+		return fmt.Errorf("invalid covered-test metrics: %w", err)
+	}
+	return nil
+}
+
+func articleBaselineRepresentativeMistakes(evaluation articleBaselineEvaluation) []articleBaselineMistakeSummary {
+	mistakes := make([]articleBaselineMistakeSummary, 0, len(articleBaselineClassLabels)*3)
+	for actualIndex, actualLabel := range articleBaselineClassLabels {
+		for predictedIndex, predictedLabel := range articleBaselineClassLabels {
+			count := evaluation.ConfusionMatrix[actualIndex][predictedIndex]
+			if actualIndex != predictedIndex && count > 0 {
+				mistakes = append(mistakes, articleBaselineMistakeSummary{
+					ActualLabel:    actualLabel,
+					PredictedLabel: predictedLabel,
+					Count:          count,
+				})
+			}
+		}
+	}
+	sort.Slice(mistakes, func(left, right int) bool {
+		if mistakes[left].Count != mistakes[right].Count {
+			return mistakes[left].Count > mistakes[right].Count
+		}
+		if mistakes[left].ActualLabel != mistakes[right].ActualLabel {
+			return articleBaselineLabelIndex(mistakes[left].ActualLabel) < articleBaselineLabelIndex(mistakes[right].ActualLabel)
+		}
+		return articleBaselineLabelIndex(mistakes[left].PredictedLabel) < articleBaselineLabelIndex(mistakes[right].PredictedLabel)
+	})
+	if len(mistakes) > maxArticleBaselineMistakes {
+		mistakes = mistakes[:maxArticleBaselineMistakes]
+	}
+	return mistakes
+}
+
+func articleBaselineLabelIndex(label string) int {
+	for index, candidate := range articleBaselineClassLabels {
+		if candidate == label {
+			return index
+		}
+	}
+	return len(articleBaselineClassLabels)
+}
+
+func cloneArticleBaselineEvaluation(source articleBaselineEvaluation) articleBaselineEvaluation {
+	perClass := make(map[string]articleBaselineClassMetric, len(source.PerClass))
+	for _, label := range articleBaselineClassLabels {
+		perClass[label] = source.PerClass[label]
+	}
+	matrix := make([][]int, len(source.ConfusionMatrix))
+	for index, row := range source.ConfusionMatrix {
+		matrix[index] = append([]int(nil), row...)
+	}
+	return articleBaselineEvaluation{
+		Accuracy:                  source.Accuracy,
+		MacroF1:                   source.MacroF1,
+		PerClass:                  perClass,
+		ConfusionMatrix:           matrix,
+		ConfusionMatrixLabelOrder: append([]string(nil), source.ConfusionMatrixLabelOrder...),
+	}
+}
+
+func articleBaselineUnitInterval(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0) && value >= 0 && value <= 1
+}
+
+func articleBaselineRoundedEqual(rendered, computed float64) bool {
+	return math.Abs(rendered-math.Round(computed*1_000_000)/1_000_000) <= 0.000001
+}
+
+func articleBaselineRatio(numerator, denominator int) float64 {
+	if denominator == 0 {
+		return 0
+	}
+	return float64(numerator) / float64(denominator)
+}
+
+func validArticleBaselineVersion(value string) bool {
+	if value == "" || value != strings.TrimSpace(value) || len(value) > 64 {
+		return false
+	}
+	for _, character := range value {
+		if (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') || (character >= '0' && character <= '9') || strings.ContainsRune("._+-", character) {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func requireArticleBaselineReportFields(raw []byte) error {

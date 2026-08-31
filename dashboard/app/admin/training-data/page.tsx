@@ -141,6 +141,46 @@ const messages = defineMessages({
   attemptWhyStopped: "The runner did not fit a model because every class must be represented in training, validation, and final testing. Add more reviewed examples—especially to the smallest class—and run the check again.",
   attemptReadyHelp: "The selected checks passed. The next run may fit an experimental local model, but it will still need an untouched evaluation before product use.",
   attemptCompletedHelp: "Treat these results as an experiment, not proof that the classifier is ready for customers.",
+  smokeResultsEyebrow: "First local CPU smoke test",
+  smokeResultsHeading: "The pipeline worked. The model is not ready yet.",
+  smokeResultsCaveat: "This small, non-evaluative run proves that local training, protected time splits, prediction, and reporting work end to end. Its scores are diagnostic—not a production benchmark, customer claim, or approval to automate alerts.",
+  smokeValidation: "Validation",
+  smokeFinalTest: "Untouched final test",
+  smokeAccuracy: "Accuracy",
+  smokeMacroF1: "Macro-F1",
+  smokeScoreHelp: "Macro-F1 gives each of the four classes equal weight, so a strong common class cannot hide a weak rare class.",
+  smokeComparisonHeading: "Final-test comparison",
+  smokeComparisonHelp: "The learned model must eventually beat both simple references. Matching a rule is not enough evidence to ship it.",
+  smokeMethod: "Method",
+  smokeModel: "Learned CPU model",
+  smokeDummy: "Dummy class-prior guess",
+  smokeRules: "Frozen keyword rules",
+  smokePerClassHeading: "What the final test says by class",
+  smokePerClassHelp: "These scores come only from the protected final-test rows. Small support counts make every percentage unstable.",
+  smokeClass: "Class",
+  smokePrecision: "Precision",
+  smokeRecall: "Recall",
+  smokeF1: "F1",
+  smokeSupport: "Test rows",
+  smokeConfusionHeading: "Confusion matrix",
+  smokeConfusionHelp: "Rows are the human answer; columns are the model prediction. The diagonal cells are correct.",
+  smokeActual: "Actual",
+  smokePredicted: "Predicted",
+  smokeAbstentionHeading: "Confidence safety check",
+  smokeAbstentionHelp: "At a {threshold}% confidence requirement, the model withheld {withheld} of {total} final-test predictions and covered {coverage}%.",
+  smokeThreshold: "Confidence threshold",
+  smokeCoverage: "Coverage",
+  smokeWithheld: "Withheld",
+  smokeCovered: "Shown",
+  smokeThresholdUntuned: "The confidence threshold was fixed before the final test; it was not tuned on these answers.",
+  smokeThresholdTunedWarning: "Warning: this threshold was tuned on the final test, so its coverage cannot be treated as an untouched result.",
+  smokeMistakesHeading: "Representative error patterns",
+  smokeMistakesHelp: "A bounded summary of where the final-test answers and predictions disagreed. It does not expose article text or imply that these are the only errors.",
+  smokeMistakePattern: "{actual} predicted as {predicted}",
+  smokeMistakeCount: "{count} rows",
+  smokeNoMistakes: "No misclassification pattern was returned in this saved report.",
+  smokeRuntime: "Local run details",
+  smokeRuntimeHelp: "{device} · {library} {version} · {features} text features · fixed seed {seed}",
   attemptCountsHeading: "Data used by the runner",
   attemptLatestReviews: "Latest reviews",
   attemptResolvedReviews: "Resolved version-2 labels",
@@ -396,6 +436,46 @@ const messages = defineMessages({
   attemptWhyStopped: "El motor no ajustó un modelo porque cada clase debe aparecer en entrenamiento, validación y prueba final. Añada más ejemplos revisados—especialmente en la clase más pequeña—y vuelva a ejecutar la comprobación.",
   attemptReadyHelp: "Las comprobaciones seleccionadas se cumplieron. La siguiente ejecución puede ajustar un modelo local experimental, pero todavía necesitará una evaluación intacta antes de usarse en el producto.",
   attemptCompletedHelp: "Considere estos resultados un experimento, no una prueba de que el clasificador esté listo para clientes.",
+  smokeResultsEyebrow: "Primera prueba local en CPU",
+  smokeResultsHeading: "El proceso funcionó. El modelo todavía no está listo.",
+  smokeResultsCaveat: "Esta ejecución pequeña y no evaluativa demuestra que el entrenamiento local, las divisiones temporales protegidas, la predicción y el informe funcionan de principio a fin. Sus puntajes son diagnósticos, no un resultado de producción, una afirmación para clientes ni permiso para automatizar alertas.",
+  smokeValidation: "Validación",
+  smokeFinalTest: "Prueba final intacta",
+  smokeAccuracy: "Exactitud",
+  smokeMacroF1: "Macro-F1",
+  smokeScoreHelp: "Macro-F1 da el mismo peso a las cuatro clases, para que una clase común fuerte no oculte una clase rara débil.",
+  smokeComparisonHeading: "Comparación en la prueba final",
+  smokeComparisonHelp: "El modelo aprendido deberá superar las dos referencias simples. Igualar una regla no basta para publicarlo.",
+  smokeMethod: "Método",
+  smokeModel: "Modelo aprendido en CPU",
+  smokeDummy: "Adivinanza por frecuencia de clase",
+  smokeRules: "Reglas fijas de palabras clave",
+  smokePerClassHeading: "Qué dice la prueba final por clase",
+  smokePerClassHelp: "Estos puntajes usan solo las filas protegidas de la prueba final. Los pocos ejemplos hacen inestable cada porcentaje.",
+  smokeClass: "Clase",
+  smokePrecision: "Precisión",
+  smokeRecall: "Cobertura de aciertos",
+  smokeF1: "F1",
+  smokeSupport: "Filas de prueba",
+  smokeConfusionHeading: "Matriz de confusión",
+  smokeConfusionHelp: "Las filas son la respuesta humana y las columnas la predicción del modelo. Las celdas diagonales son correctas.",
+  smokeActual: "Real",
+  smokePredicted: "Predicho",
+  smokeAbstentionHeading: "Comprobación de seguridad por confianza",
+  smokeAbstentionHelp: "Con un requisito de confianza de {threshold}%, el modelo retuvo {withheld} de {total} predicciones finales y cubrió {coverage}%.",
+  smokeThreshold: "Umbral de confianza",
+  smokeCoverage: "Cobertura",
+  smokeWithheld: "Retenidas",
+  smokeCovered: "Mostradas",
+  smokeThresholdUntuned: "El umbral de confianza se fijó antes de la prueba final; no se ajustó usando estas respuestas.",
+  smokeThresholdTunedWarning: "Advertencia: este umbral se ajustó con la prueba final, por lo que su cobertura no es un resultado intacto.",
+  smokeMistakesHeading: "Patrones representativos de error",
+  smokeMistakesHelp: "Un resumen limitado de dónde no coincidieron las respuestas finales y las predicciones. No expone el texto del artículo ni implica que sean los únicos errores.",
+  smokeMistakePattern: "{actual} predicha como {predicted}",
+  smokeMistakeCount: "{count} filas",
+  smokeNoMistakes: "Este informe guardado no devolvió ningún patrón de clasificación incorrecta.",
+  smokeRuntime: "Detalles de la ejecución local",
+  smokeRuntimeHelp: "{device} · {library} {version} · {features} características de texto · semilla fija {seed}",
   attemptCountsHeading: "Datos utilizados por el motor",
   attemptLatestReviews: "Revisiones más recientes",
   attemptResolvedReviews: "Etiquetas resueltas de versión 2",
@@ -584,6 +664,53 @@ type TrainingAttemptReadiness = {
   gates: TrainingAttemptGate[];
 };
 
+type TrainingScore = {
+  accuracy: number;
+  macro_f1: number;
+};
+
+type TrainingClassScore = {
+  precision: number;
+  recall: number;
+  f1: number;
+  support: number;
+};
+
+type TrainingEvaluation = TrainingScore & {
+  per_class: Record<ResolvedDecision, TrainingClassScore>;
+  confusion_matrix: number[][];
+  confusion_matrix_label_order: ResolvedDecision[];
+};
+
+type TrainingResults = {
+  model_type: string;
+  feature_dimensions: number;
+  runtime: {
+    execution_device: "CPU";
+    library: "scikit-learn";
+    library_version: string;
+    random_seed: number;
+  };
+  validation: TrainingEvaluation;
+  test: TrainingEvaluation;
+  baselines: {
+    dummy_prior_test: TrainingEvaluation;
+    frozen_keyword_rules_test: TrainingEvaluation;
+  };
+  abstention: {
+    threshold: number;
+    abstained_rows: number;
+    covered_rows: number;
+    coverage: number;
+    threshold_was_tuned_on_test: boolean;
+  };
+  representative_mistakes: Array<{
+    actual_label: ResolvedDecision;
+    predicted_label: ResolvedDecision;
+    count: number;
+  }>;
+};
+
 type TrainingMapLocation = {
   location_name: string;
   country_code: string;
@@ -638,6 +765,7 @@ type TrainingAttempt = {
   };
   production_readiness: TrainingAttemptReadiness;
   smoke_test_readiness: TrainingAttemptReadiness;
+  results?: TrainingResults;
   blocked_reason?: string;
 };
 
@@ -761,6 +889,112 @@ const isResolvedClassCounts = (value: unknown): value is Record<ResolvedDecision
   && resolvedClasses.every(({ value: decision }) => isNonNegativeInteger(value[decision]))
 );
 
+const resolvedDecisionValues = resolvedClasses.map(({ value }) => value);
+const resolvedDecisionSet = new Set<ResolvedDecision>(resolvedDecisionValues);
+
+const isResolvedDecision = (value: unknown): value is ResolvedDecision => (
+  typeof value === "string" && resolvedDecisionSet.has(value as ResolvedDecision)
+);
+
+const isUnitMetric = (value: unknown): value is number => (
+  typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1
+);
+
+const isTrainingClassScore = (value: unknown): value is TrainingClassScore => (
+  isRecord(value)
+  && isUnitMetric(value.precision)
+  && isUnitMetric(value.recall)
+  && isUnitMetric(value.f1)
+  && isNonNegativeInteger(value.support)
+);
+
+const isTrainingEvaluation = (value: unknown): value is TrainingEvaluation => {
+  if (!isRecord(value)
+    || !isUnitMetric(value.accuracy)
+    || !isUnitMetric(value.macro_f1)) return false;
+  const perClass = value.per_class;
+  const labelOrder = value.confusion_matrix_label_order;
+  const matrix = value.confusion_matrix;
+  if (!isRecord(perClass)
+    || Object.keys(perClass).length !== resolvedDecisionValues.length
+    || !resolvedDecisionValues.every((decision) => isTrainingClassScore(perClass[decision]))
+    || !Array.isArray(labelOrder)
+    || labelOrder.length !== resolvedDecisionValues.length
+    || !labelOrder.every(isResolvedDecision)
+    || new Set(labelOrder).size !== resolvedDecisionValues.length
+    || !Array.isArray(matrix)
+    || matrix.length !== resolvedDecisionValues.length) return false;
+
+  const matrixIsValid = matrix.every((row) => (
+    Array.isArray(row)
+    && row.length === resolvedDecisionValues.length
+    && row.every(isNonNegativeInteger)
+  ));
+  if (!matrixIsValid) return false;
+
+  const typedLabelOrder = labelOrder as ResolvedDecision[];
+  const typedMatrix = matrix as number[][];
+  const typedPerClass = perClass as Record<ResolvedDecision, TrainingClassScore>;
+  return typedLabelOrder.every((decision, rowIndex) => (
+    typedMatrix[rowIndex].reduce((total, count) => total + count, 0)
+      === typedPerClass[decision].support
+  ));
+};
+
+const isTrainingResults = (value: unknown): value is TrainingResults => {
+  if (!isRecord(value)
+    || typeof value.model_type !== "string"
+    || !value.model_type.trim()
+    || !isNonNegativeInteger(value.feature_dimensions)
+    || value.feature_dimensions === 0
+    || !isRecord(value.runtime)
+    || value.runtime.execution_device !== "CPU"
+    || value.runtime.library !== "scikit-learn"
+    || typeof value.runtime.library_version !== "string"
+    || !value.runtime.library_version.trim()
+    || !isNonNegativeInteger(value.runtime.random_seed)
+    || !isTrainingEvaluation(value.validation)
+    || !isTrainingEvaluation(value.test)
+    || !isRecord(value.baselines)
+    || !isTrainingEvaluation(value.baselines.dummy_prior_test)
+    || !isTrainingEvaluation(value.baselines.frozen_keyword_rules_test)
+    || !isRecord(value.abstention)
+    || !isUnitMetric(value.abstention.threshold)
+    || !isNonNegativeInteger(value.abstention.abstained_rows)
+    || !isNonNegativeInteger(value.abstention.covered_rows)
+    || !isUnitMetric(value.abstention.coverage)
+    || typeof value.abstention.threshold_was_tuned_on_test !== "boolean"
+    || !Array.isArray(value.representative_mistakes)
+    || value.representative_mistakes.length > 8) return false;
+
+  const testRows = Object.values(value.test.per_class)
+    .reduce((total, score) => total + score.support, 0);
+  if (value.abstention.abstained_rows + value.abstention.covered_rows !== testRows) return false;
+  const expectedCoverage = testRows === 0 ? 0 : value.abstention.covered_rows / testRows;
+  if (Math.abs(expectedCoverage - value.abstention.coverage) > 0.000001) return false;
+
+  const mistakePairs = new Set<string>();
+  let representedMistakes = 0;
+  for (const mistake of value.representative_mistakes) {
+    if (!isRecord(mistake)
+      || !isResolvedDecision(mistake.actual_label)
+      || !isResolvedDecision(mistake.predicted_label)
+      || mistake.actual_label === mistake.predicted_label
+      || !isNonNegativeInteger(mistake.count)
+      || mistake.count === 0) return false;
+    const pair = `${mistake.actual_label}:${mistake.predicted_label}`;
+    if (mistakePairs.has(pair)) return false;
+    mistakePairs.add(pair);
+    representedMistakes += mistake.count;
+  }
+  const totalMistakes = value.test.confusion_matrix.reduce((total, row, rowIndex) => (
+    total + row.reduce((rowTotal, count, columnIndex) => (
+      rowTotal + (rowIndex === columnIndex ? 0 : count)
+    ), 0)
+  ), 0);
+  return representedMistakes <= totalMistakes;
+};
+
 const isTrainingAttemptGate = (value: unknown): value is TrainingAttemptGate => {
   if (!isRecord(value) || typeof value.name !== "string" || !trainingGateNames.has(value.name)) return false;
   const actualIsValid = typeof value.actual === "boolean"
@@ -838,10 +1072,11 @@ const isTrainingAttemptSplit = (value: unknown): value is TrainingAttempt["split
     || !isRecord(value.class_counts)) return false;
   if ([value.reason, value.method, value.time_field, value.validation_boundary, value.test_boundary]
     .some((item) => item !== undefined && typeof item !== "string")) return false;
-  const splitNames = Object.keys(value.class_counts);
+  const classCounts = value.class_counts as Record<string, unknown>;
+  const splitNames = Object.keys(classCounts);
   if (!value.computable) return splitNames.length === 0;
   return splitNames.length === 3
-    && ["training", "validation", "test"].every((name) => isResolvedClassCounts(value.class_counts[name]));
+    && ["training", "validation", "test"].every((name) => isResolvedClassCounts(classCounts[name]));
 };
 
 const isTrainingAttempt = (value: unknown): value is TrainingAttempt => {
@@ -864,6 +1099,7 @@ const isTrainingAttempt = (value: unknown): value is TrainingAttempt => {
     || !isTrainingAttemptReadiness(value.production_readiness)
     || !isTrainingAttemptReadiness(value.smoke_test_readiness)) return false;
   if (value.geography_summary !== undefined && !isTrainingGeographySummary(value.geography_summary)) return false;
+  if (value.results !== undefined && !isTrainingResults(value.results)) return false;
   if (value.latest_reviewed_at !== undefined
     && (typeof value.latest_reviewed_at !== "string" || Number.isNaN(Date.parse(value.latest_reviewed_at)))) return false;
   if (value.report_schema_version === 2
@@ -895,6 +1131,7 @@ const isTrainingAttempt = (value: unknown): value is TrainingAttempt => {
   const completed = completedTrainingAttemptStatuses.has(candidate.status);
   if (candidate.training_performed !== completed) return false;
   if (candidate.training_performed !== Boolean(candidate.evaluation_tier)) return false;
+  if (candidate.results !== undefined && !candidate.training_performed) return false;
   return true;
 };
 
@@ -1142,6 +1379,11 @@ export default function TrainingDataPage() {
   }, [trainingAttempt?.dataset_fingerprint, trainingAttempt?.geography_summary?.locations.length]);
 
   const formatNumber = useCallback((value: number) => value.toLocaleString(localeTag), [localeTag]);
+  const formatMetricPercent = useCallback((value: number) => new Intl.NumberFormat(localeTag, {
+    style: "percent",
+    maximumFractionDigits: 1,
+    minimumFractionDigits: 1,
+  }).format(value), [localeTag]);
   const formatBytes = useCallback((value: number | null | undefined) => {
     if (value === null || value === undefined || value < 0) return "—";
     const units = ["B", "KB", "MB", "GB", "TB"];
@@ -1174,6 +1416,11 @@ export default function TrainingDataPage() {
     if (resolvedClass) return t(resolvedClass.labelKey);
     if (article.decision === "uncertain") return t("uncertain");
     return t("legacyLabel");
+  }, [t]);
+
+  const resolvedDecisionLabel = useCallback((decision: ResolvedDecision) => {
+    const resolvedClass = resolvedClasses.find(({ value }) => value === decision);
+    return resolvedClass ? t(resolvedClass.labelKey) : decision;
   }, [t]);
 
   const exclusionLabel = useCallback((article: TrainingArticle) => {
@@ -1338,6 +1585,10 @@ export default function TrainingDataPage() {
   const attemptReadiness = trainingAttempt
     ? attemptIsSmokeTest ? trainingAttempt.smoke_test_readiness : trainingAttempt.production_readiness
     : null;
+  const smokeResults = trainingAttempt?.status === "non_evaluative_smoke_test_completed"
+    && trainingAttempt.evaluation_tier === "NON_EVALUATIVE_SMOKE_TEST"
+    ? trainingAttempt.results
+    : undefined;
   const attemptExcludedCount = trainingAttempt
     ? Object.values(trainingAttempt.exclusion_counts).reduce((total, count) => total + count, 0)
     : 0;
@@ -1567,6 +1818,163 @@ export default function TrainingDataPage() {
                     ) : <p className="tdl-attempt-split-warning">{t("attemptSplitUnavailable")}</p>}
                   </section>
                 </div>
+
+                {smokeResults ? (
+                  <section className="tdl-smoke-results" aria-labelledby="smoke-results-heading">
+                    <header className="tdl-smoke-results-header">
+                      <div>
+                        <p className="eyebrow">{t("smokeResultsEyebrow")}</p>
+                        <h4 id="smoke-results-heading">{t("smokeResultsHeading")}</h4>
+                        <p>{t("smokeResultsCaveat")}</p>
+                      </div>
+                      <aside aria-label={t("smokeRuntime")}>
+                        <strong>{t("smokeRuntime")}</strong>
+                        <span>{t("smokeRuntimeHelp", {
+                          device: smokeResults.runtime.execution_device,
+                          library: smokeResults.runtime.library,
+                          version: smokeResults.runtime.library_version,
+                          features: formatNumber(smokeResults.feature_dimensions),
+                          seed: formatNumber(smokeResults.runtime.random_seed),
+                        })}</span>
+                      </aside>
+                    </header>
+
+                    <div className="tdl-smoke-score-grid">
+                      {[
+                        { label: t("smokeValidation"), result: smokeResults.validation },
+                        { label: t("smokeFinalTest"), result: smokeResults.test },
+                      ].map(({ label, result }) => (
+                        <div key={label}>
+                          <strong>{label}</strong>
+                          <dl>
+                            <div><dt>{t("smokeAccuracy")}</dt><dd>{formatMetricPercent(result.accuracy)}</dd></div>
+                            <div><dt>{t("smokeMacroF1")}</dt><dd>{formatMetricPercent(result.macro_f1)}</dd></div>
+                          </dl>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="tdl-smoke-score-help">{t("smokeScoreHelp")}</p>
+
+                    <div className="tdl-smoke-results-grid">
+                      <section aria-labelledby="smoke-comparison-heading">
+                        <h5 id="smoke-comparison-heading">{t("smokeComparisonHeading")}</h5>
+                        <p>{t("smokeComparisonHelp")}</p>
+                        <div aria-label={t("smokeComparisonHeading")} className="tdl-results-table-wrap" role="region">
+                          <table className="tdl-results-table tdl-comparison-table">
+                            <thead><tr><th scope="col">{t("smokeMethod")}</th><th scope="col">{t("smokeAccuracy")}</th><th scope="col">{t("smokeMacroF1")}</th></tr></thead>
+                            <tbody>
+                              {[
+                                { label: t("smokeModel"), result: smokeResults.test, model: true },
+                                { label: t("smokeDummy"), result: smokeResults.baselines.dummy_prior_test, model: false },
+                                { label: t("smokeRules"), result: smokeResults.baselines.frozen_keyword_rules_test, model: false },
+                              ].map(({ label, result, model }) => (
+                                <tr className={model ? "model" : undefined} key={label}>
+                                  <th scope="row">{label}</th>
+                                  <td>{formatMetricPercent(result.accuracy)}</td>
+                                  <td>{formatMetricPercent(result.macro_f1)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </section>
+
+                      <section aria-labelledby="smoke-abstention-heading">
+                        <h5 id="smoke-abstention-heading">{t("smokeAbstentionHeading")}</h5>
+                        <p>{t("smokeAbstentionHelp", {
+                          threshold: (smokeResults.abstention.threshold * 100).toLocaleString(localeTag, { maximumFractionDigits: 1 }),
+                          withheld: formatNumber(smokeResults.abstention.abstained_rows),
+                          total: formatNumber(smokeResults.abstention.abstained_rows + smokeResults.abstention.covered_rows),
+                          coverage: (smokeResults.abstention.coverage * 100).toLocaleString(localeTag, { maximumFractionDigits: 1 }),
+                        })}</p>
+                        <dl className="tdl-abstention-stats">
+                          <div><dt>{t("smokeThreshold")}</dt><dd>{formatMetricPercent(smokeResults.abstention.threshold)}</dd></div>
+                          <div><dt>{t("smokeCoverage")}</dt><dd>{formatMetricPercent(smokeResults.abstention.coverage)}</dd></div>
+                          <div><dt>{t("smokeWithheld")}</dt><dd>{formatNumber(smokeResults.abstention.abstained_rows)}</dd></div>
+                          <div><dt>{t("smokeCovered")}</dt><dd>{formatNumber(smokeResults.abstention.covered_rows)}</dd></div>
+                        </dl>
+                        <p className={smokeResults.abstention.threshold_was_tuned_on_test ? "tdl-threshold-note warning" : "tdl-threshold-note"}>
+                          {t(smokeResults.abstention.threshold_was_tuned_on_test
+                            ? "smokeThresholdTunedWarning"
+                            : "smokeThresholdUntuned")}
+                        </p>
+                      </section>
+                    </div>
+
+                    <section className="tdl-smoke-table-section" aria-labelledby="smoke-per-class-heading">
+                      <h5 id="smoke-per-class-heading">{t("smokePerClassHeading")}</h5>
+                      <p>{t("smokePerClassHelp")}</p>
+                      <div aria-label={t("smokePerClassHeading")} className="tdl-results-table-wrap" role="region">
+                        <table className="tdl-results-table tdl-per-class-table">
+                          <thead><tr><th scope="col">{t("smokeClass")}</th><th scope="col">{t("smokePrecision")}</th><th scope="col">{t("smokeRecall")}</th><th scope="col">{t("smokeF1")}</th><th scope="col">{t("smokeSupport")}</th></tr></thead>
+                          <tbody>
+                            {resolvedClasses.map(({ value, labelKey }) => {
+                              const score = smokeResults.test.per_class[value];
+                              return (
+                                <tr key={value}>
+                                  <th scope="row">{t(labelKey)}</th>
+                                  <td>{formatMetricPercent(score.precision)}</td>
+                                  <td>{formatMetricPercent(score.recall)}</td>
+                                  <td>{formatMetricPercent(score.f1)}</td>
+                                  <td>{formatNumber(score.support)}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </section>
+
+                    <div className="tdl-smoke-results-grid tdl-smoke-bottom-grid">
+                      <section aria-labelledby="smoke-confusion-heading">
+                        <h5 id="smoke-confusion-heading">{t("smokeConfusionHeading")}</h5>
+                        <p>{t("smokeConfusionHelp")}</p>
+                        <div aria-label={t("smokeConfusionHeading")} className="tdl-results-table-wrap" role="region">
+                          <table className="tdl-results-table tdl-confusion-table">
+                            <thead>
+                              <tr>
+                                <th scope="col"><span>{t("smokeActual")} ↓</span><span>{t("smokePredicted")} →</span></th>
+                                {smokeResults.test.confusion_matrix_label_order.map((decision) => (
+                                  <th scope="col" key={decision}>{resolvedDecisionLabel(decision)}</th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {smokeResults.test.confusion_matrix_label_order.map((decision, rowIndex) => (
+                                <tr key={decision}>
+                                  <th scope="row">{resolvedDecisionLabel(decision)}</th>
+                                  {smokeResults.test.confusion_matrix[rowIndex].map((count, columnIndex) => (
+                                    <td className={rowIndex === columnIndex ? "correct" : count > 0 ? "error" : undefined} key={`${decision}-${columnIndex}`}>
+                                      {formatNumber(count)}
+                                    </td>
+                                  ))}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </section>
+
+                      <section aria-labelledby="smoke-mistakes-heading">
+                        <h5 id="smoke-mistakes-heading">{t("smokeMistakesHeading")}</h5>
+                        <p>{t("smokeMistakesHelp")}</p>
+                        {smokeResults.representative_mistakes.length ? (
+                          <ol className="tdl-mistake-list">
+                            {smokeResults.representative_mistakes.map((mistake) => (
+                              <li key={`${mistake.actual_label}-${mistake.predicted_label}`}>
+                                <span>{t("smokeMistakePattern", {
+                                  actual: resolvedDecisionLabel(mistake.actual_label),
+                                  predicted: resolvedDecisionLabel(mistake.predicted_label),
+                                })}</span>
+                                <strong>{t("smokeMistakeCount", { count: formatNumber(mistake.count) })}</strong>
+                              </li>
+                            ))}
+                          </ol>
+                        ) : <p className="tdl-no-mistakes">{t("smokeNoMistakes")}</p>}
+                      </section>
+                    </div>
+                  </section>
+                ) : null}
 
                 {attemptReadiness ? (
                   <section className="tdl-attempt-block tdl-attempt-gates" aria-labelledby="attempt-gates-heading">

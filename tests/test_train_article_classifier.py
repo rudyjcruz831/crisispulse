@@ -48,11 +48,30 @@ def _review(
     }
 
 
+def _protocol_review(
+    article_id: str,
+    decision: str,
+    reviewed_at: datetime,
+    *,
+    headline_support: str = "sufficient",
+) -> dict[str, object]:
+    review = _review(article_id, decision, reviewed_at)
+    review.pop("tags")
+    review.update(
+        review_protocol_version=1,
+        review_basis="full_article",
+        headline_support=headline_support,
+        impact_flags=[],
+        context_flags=[],
+    )
+    return review
+
+
 def _write_reviews(path: Path, reviews: list[dict[str, object]]) -> None:
     normalized = []
     for review in reviews:
         value = dict(review)
-        if value.get("tags") is None:
+        if "tags" in value and value["tags"] is None:
             value.pop("tags")
         normalized.append(json.dumps(value))
     path.write_text("\n".join(normalized) + "\n", encoding="utf-8")
@@ -150,6 +169,71 @@ def test_readiness_uses_latest_decision_and_reports_every_exclusion(tmp_path: Pa
     assert report["training_performed"] is False
     assert report["status"] == "not_ready"
     assert report["geography_summary"]["mappable_rows"] == 0
+
+
+def test_protocol_reviews_require_headline_support_for_training(tmp_path: Path) -> None:
+    reviews_path = tmp_path / "article-reviews.jsonl"
+    archive_path = tmp_path / "articles.parquet"
+    now = datetime(2026, 8, 25, tzinfo=UTC)
+    sufficient_id = _article_id("protocol-sufficient")
+    body_required_id = _article_id("protocol-body-required")
+    _write_reviews(
+        reviews_path,
+        [
+            _protocol_review(sufficient_id, "reported_flooding", now),
+            _protocol_review(
+                body_required_id,
+                "reported_flooding",
+                now + timedelta(minutes=1),
+                headline_support="body_required",
+            ),
+        ],
+    )
+    _write_archive(
+        archive_path,
+        [
+            {
+                "article_id": sufficient_id,
+                "seen_at": now,
+                "canonical_url": "https://one.example/flooding-closes-road",
+                "source_domain": "one.example",
+                "duplicate_group_id": "protocol-story-1",
+                "publisher_title": "Flooding closes road",
+            },
+            {
+                "article_id": body_required_id,
+                "seen_at": now + timedelta(minutes=1),
+                "canonical_url": "https://two.example/flooding-context-requires-body",
+                "source_domain": "two.example",
+                "duplicate_group_id": "protocol-story-2",
+                "publisher_title": "Flooding context requires body",
+            },
+        ],
+    )
+
+    report, prepared, _split = build_readiness_report(reviews_path, archive_path)
+
+    assert report["latest_review_count"] == 2
+    assert report["resolved_schema_v2_count"] == 1
+    assert report["usable_training_rows"] == 1
+    assert report["exclusion_counts"]["headline_not_sufficient"] == 1
+    assert [row.article_id for row in prepared.rows] == [sufficient_id]
+
+
+def test_protocol_review_rejects_free_form_tags_and_duplicate_flags(tmp_path: Path) -> None:
+    path = tmp_path / "article-reviews.jsonl"
+    now = datetime(2026, 8, 25, tzinfo=UTC)
+    review = _protocol_review(_article_id("invalid-protocol"), "reported_flooding", now)
+    review["tags"] = []
+    _write_reviews(path, [review])
+    with pytest.raises(ValueError, match="free-form tags"):
+        load_latest_native_reviews(path)
+
+    review.pop("tags")
+    review["impact_flags"] = ["fatality", "fatality"]
+    _write_reviews(path, [review])
+    with pytest.raises(ValueError, match="impact_flags"):
+        load_latest_native_reviews(path)
 
 
 def test_readiness_uses_exactly_bound_publisher_metadata_from_review(

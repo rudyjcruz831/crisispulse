@@ -53,8 +53,26 @@ ARTICLE_DECISIONS_V2 = {
     "uncertain",
 }
 ARTICLE_DECISION_SCHEMA_VERSION = 2
+ARTICLE_REVIEW_PROTOCOL_VERSION = 1
 ARTICLE_TAG_MAX_COUNT = 8
 ARTICLE_TAG_MAX_LENGTH = 32
+ARTICLE_REVIEW_BASES = {"full_article", "publisher_summary", "headline_only", "unavailable"}
+ARTICLE_HEADLINE_SUPPORT = {"sufficient", "body_required", "conflicts_with_body"}
+ARTICLE_NO_SIGNAL_REASONS = {
+    "flood_context_analysis", "other_weather_non_flood", "unrelated_false_match"
+}
+ARTICLE_UNCERTAINTY_REASONS = {
+    "access_blocked", "page_unavailable", "wrong_or_junk_page", "multi_story_page",
+    "language_barrier", "insufficient_or_conflicting",
+}
+ARTICLE_IMPACT_FLAGS = {
+    "fatality", "injury", "evacuation_displacement", "rescue_search",
+    "property_crop_damage", "transport_disruption", "utility_disruption",
+}
+ARTICLE_CONTEXT_FLAGS = {
+    "aftermath_recovery", "climate_background", "historical_background",
+    "policy_preparedness",
+}
 MATCH_STRENGTHS = {"high", "weak"}
 REVIEW_BUCKETS = {"high_match", "headline_conflict", "ambiguous_match"}
 ARTICLE_TITLE_SOURCES = {
@@ -241,6 +259,7 @@ def _validate_article_review(payload: dict[str, Any], *, label: str) -> None:
     decision = _string_field(payload, "decision", label=label)
     reviewed_at = _string_field(payload, "reviewed_at", label=label)
     decision_schema_version = payload.get("decision_schema_version", 1)
+    tags_present = "tags" in payload
     tags = payload.get("tags", [])
     title_source = payload.get("title_source", "")
     # The Go API serializes an empty optional slice as JSON null. Treat that
@@ -299,7 +318,77 @@ def _validate_article_review(payload: dict[str, Any], *, label: str) -> None:
         ):
             raise ValidationError(f"{label} has invalid article tags")
         seen_tags.add(tag)
+
+    protocol_version = payload.get("review_protocol_version", 0)
+    protocol_fields = {
+        "review_protocol_version", "review_basis", "headline_support",
+        "no_signal_reason", "uncertainty_reason", "impact_flags", "context_flags",
+    }
+    if isinstance(protocol_version, bool) or not isinstance(protocol_version, int):
+        raise ValidationError(f"{label} has an invalid review_protocol_version")
+    if protocol_version == 0:
+        if protocol_fields.intersection(payload):
+            raise ValidationError(f"{label} has protocol fields without protocol 1")
+    elif protocol_version == ARTICLE_REVIEW_PROTOCOL_VERSION:
+        if decision_schema_version != ARTICLE_DECISION_SCHEMA_VERSION:
+            raise ValidationError(f"{label} protocol 1 requires decision schema 2")
+        if tags_present:
+            raise ValidationError(f"{label} protocol 1 cannot contain free-form tags")
+        review_basis = payload.get("review_basis")
+        headline_support = payload.get("headline_support", "")
+        no_signal_reason = payload.get("no_signal_reason", "")
+        uncertainty_reason = payload.get("uncertainty_reason", "")
+        if review_basis not in ARTICLE_REVIEW_BASES:
+            raise ValidationError(f"{label} has invalid review_basis")
+        if not all(
+            isinstance(value, str)
+            for value in (headline_support, no_signal_reason, uncertainty_reason)
+        ):
+            raise ValidationError(f"{label} has invalid protocol fields")
+        impact_flags = _validate_article_protocol_flags(
+            payload.get("impact_flags", []), ARTICLE_IMPACT_FLAGS, label=label, field="impact_flags"
+        )
+        context_flags = _validate_article_protocol_flags(
+            payload.get("context_flags", []), ARTICLE_CONTEXT_FLAGS, label=label, field="context_flags"
+        )
+        if decision == "uncertain":
+            if uncertainty_reason not in ARTICLE_UNCERTAINTY_REASONS:
+                raise ValidationError(f"{label} uncertain review requires uncertainty_reason")
+            if headline_support or no_signal_reason or impact_flags or context_flags:
+                raise ValidationError(f"{label} uncertain review contains resolved fields")
+        else:
+            if review_basis == "unavailable":
+                raise ValidationError(f"{label} unavailable basis requires uncertain decision")
+            if headline_support not in ARTICLE_HEADLINE_SUPPORT:
+                raise ValidationError(f"{label} resolved review requires headline_support")
+            if review_basis == "headline_only" and headline_support != "sufficient":
+                raise ValidationError(f"{label} headline-only review has invalid support")
+            if uncertainty_reason:
+                raise ValidationError(f"{label} resolved review contains uncertainty_reason")
+            if decision == "not_flood_related":
+                if no_signal_reason not in ARTICLE_NO_SIGNAL_REASONS:
+                    raise ValidationError(f"{label} not-flood review requires no_signal_reason")
+            elif no_signal_reason:
+                raise ValidationError(f"{label} non-negative review contains no_signal_reason")
+    else:
+        raise ValidationError(f"{label} has an invalid review_protocol_version")
     _parse_record_timestamp(reviewed_at, label=label)
+
+
+def _validate_article_protocol_flags(
+    value: Any,
+    allowed: set[str],
+    *,
+    label: str,
+    field: str,
+) -> list[str]:
+    if (
+        not isinstance(value, list)
+        or any(not isinstance(item, str) or item not in allowed for item in value)
+        or len(set(value)) != len(value)
+    ):
+        raise ValidationError(f"{label} has invalid {field}")
+    return value
 
 
 def _validate_review_log(path: Path) -> None:

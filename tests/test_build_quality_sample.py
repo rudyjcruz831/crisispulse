@@ -399,8 +399,17 @@ def test_smart_queue_excludes_completed_v2_and_prioritizes_legacy(
     _write_archive(archive_path)
     completed_id = f"{0:064x}"
     legacy_id = f"{17:064x}"
+    completed = _review(completed_id, "reported_flooding")
+    completed.pop("tags")
+    completed.update(
+        review_protocol_version=1,
+        review_basis="headline_only",
+        headline_support="sufficient",
+        impact_flags=[],
+        context_flags=[],
+    )
     records = [
-        _review(completed_id, "reported_flooding"),
+        completed,
         {
             key: value
             for key, value in _review(legacy_id, "relevant", 1).items()

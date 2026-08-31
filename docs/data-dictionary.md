@@ -47,9 +47,26 @@ Top-level `selection_intent` records the active smoke-test thresholds, current c
 
 Each item carries only bounded review evidence: stable article ID, timestamp, title, title source (`manual_override`, `publisher_metadata`, `url_path`, or `unavailable`), safe publisher URL/domain, location, match strength, review reason, matched themes, and quality flags. Publisher metadata is preferred; the URL-path parser removes common dates, IDs, UUIDs, file extensions, and generic route segments. `manual_override` means the exact publisher page was human-verified and recorded in the checked-in audit file because normal automated reading was prohibited. When no trustworthy source yields a headline, the sample explicitly reports that the title is unavailable rather than displaying a domain or opaque identifier as a headline.
 
-Human decisions are stored separately in append-only `article-reviews.jsonl`. Version 2 records include `decision_schema_version: 2`, one of `reported_flooding`, `flood_risk_warning`, `heavy_rain_only`, `not_flood_related`, or `uncertain`, an optional `tags` array, and optional `title_source` provenance copied by the API from the server-side sample. The browser cannot submit or override that provenance. Tags are distinct lowercase Unicode letter/digit slugs, limited to eight values and 32 characters each. They capture secondary context such as `fatality`, `heavy-rain`, `flood-damage`, or `cleanup`; they never replace the primary decision. The API collapses corrections to the latest decision per `article_id` while retaining earlier audit entries on disk. Historical records without a schema-version or title-source field remain valid; coarse version 1 values still require a new detailed answer before entering version 2 measurements or training data.
+Human decisions are stored separately in append-only `article-reviews.jsonl`. The primary decision schema remains version 2: `reported_flooding`, `flood_risk_warning`, `heavy_rain_only`, `not_flood_related`, or `uncertain`. New reviews also use `review_protocol_version: 1` to record the evidence basis, headline sufficiency, controlled reasons, and closed-vocabulary flags described below. The browser cannot submit or override server-side article identity or `title_source` provenance. The API collapses corrections to the latest decision per `article_id` while retaining earlier audit entries on disk. Historical records without a schema-version, protocol-version, or title-source field remain valid; coarse version 1 decisions still require a detailed version 2 answer before entering version 2 measurements or training data.
 
-The detailed decision order is: reported physical flooding; otherwise explicit flood risk/watch/warning; otherwise heavy rain or severe weather without flood evidence; otherwise unrelated content. Use `uncertain` only when the source cannot support a decision. The quality API export includes the schema version and pipe-separated custom tags. The Training Data Lab endpoints below additionally identify which latest labels are eligible and can be joined to the permanent archive by `article_id`.
+The detailed decision order is: reported physical flooding; otherwise explicit flood risk/watch/warning; otherwise heavy rain or severe weather without flood evidence; otherwise no actionable signal. Apply that precedence only to the main article's central claim, not to navigation, sidebars, recommendations, or incidental historical mentions. Use `uncertain` only when the publisher evidence cannot support a decision. See [the article review protocol](article-review-protocol.md) for the normative human criteria.
+
+### Article review protocol fields
+
+| Field | Type | Meaning |
+|---|---|---|
+| `review_protocol_version` | integer/null | `1` for the structured evidence protocol. Missing on older readable records. It does not change `decision_schema_version: 2`. |
+| `review_basis` | string/null | Required on protocol-1 reviews: `full_article`, `publisher_summary`, `headline_only`, or `unavailable`. `unavailable` is restricted to `uncertain`. |
+| `headline_support` | string/null | Required on resolved protocol-1 decisions and forbidden on `uncertain`: `sufficient`, `body_required`, or `conflicts_with_body`. A resolved `headline_only` review must be `sufficient`. |
+| `no_signal_reason` | string/null | Required only for `not_flood_related`: `flood_context_analysis`, `other_weather_non_flood`, or `unrelated_false_match`. |
+| `uncertainty_reason` | string/null | Required only for `uncertain`: `access_blocked`, `page_unavailable`, `wrong_or_junk_page`, `multi_story_page`, `language_barrier`, or `insufficient_or_conflicting`. |
+| `impact_flags` | list[string]/null | Unique controlled values: `fatality`, `injury`, `evacuation_displacement`, `rescue_search`, `property_crop_damage`, `transport_disruption`, and `utility_disruption`. Forbidden on `uncertain`. |
+| `context_flags` | list[string]/null | Unique controlled values: `aftermath_recovery`, `climate_background`, `historical_background`, and `policy_preparedness`. Forbidden on `uncertain`. |
+| `tags` | list[string]/null | Historical free-form tags from pre-protocol records. They remain readable and exportable but protocol-1 requests reject them; they are never silently converted to flags. |
+
+Missing or unselected flags mean unrecorded, not confirmed absent. Protocol
+fields and flags support audit and evaluation slices; they are not current model
+features.
 
 ## Training Data Lab derived fields
 
@@ -57,8 +74,8 @@ The Training Data Lab API and its audit CSV derive these fields from the latest 
 
 | Field | Type | Meaning |
 |---|---|---|
-| `training_eligible` | boolean | `true` only when the latest decision uses schema version 2 and is one of `reported_flooding`, `flood_risk_warning`, `heavy_rain_only`, or `not_flood_related`. It does not assert that the overall dataset is large or balanced enough for model training. |
-| `exclusion_reason` | string | Empty for eligible rows, `uncertain` for a version 2 uncertain label, or `legacy_schema` for a version 1 label. Historical records with no stored schema version are read as version 1. |
+| `training_eligible` | boolean | `true` only when the latest decision uses schema version 2, is one of the four resolved targets, and passes the current inference-text evidence gate. It does not assert that the overall dataset is large or balanced enough for model training. |
+| `exclusion_reason` | string | Empty for eligible rows, `uncertain` for a version 2 uncertain label, `legacy_schema` for a version 1 label, or `headline_not_sufficient` for a resolved protocol-1 review marked `body_required` or `conflicts_with_body`. Historical records with no stored schema version are read as version 1. |
 
 Corrections remain append-only on disk, but the Training Data Lab exposes only the newest decision per article. Consequently, an earlier eligible label can become excluded after an uncertain correction, and a corrected version 2 label can replace a legacy label in the derived view without deleting either audit entry.
 
