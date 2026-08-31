@@ -69,7 +69,32 @@ After the short soak test passes, install the permanent local production schedul
 powershell -ExecutionPolicy Bypass -File .\scripts\install-production-refresh-task.ps1
 ```
 
-It repeats every 15 minutes until explicitly removed, starts a missed run when Windows becomes available, skips overlap, and attempts to launch Docker Desktop when the engine is stopped. The scheduled action uses the hidden Windows Script Host launcher, so it does not flash a PowerShell or Docker terminal during normal runs. Collection occurs only while the PC is on, the user is signed in, and internet access is available; after sleep or shutdown, the next available run catches up from the newest overlap. Remove only the schedule with `scripts/uninstall-production-refresh-task.ps1`; this does not remove raw data, permanent history, reviews, or backups.
+It repeats every 15 minutes until explicitly removed, starts a missed run when Windows becomes available, skips overlap, and attempts to launch Docker Desktop when the engine is stopped. The refresh container is capped at eight CPUs by default so the browser and desktop remain responsive; change `CRISISPULSE_REFRESH_CPUS` only after measuring the effect. The scheduled action uses the hidden Windows Script Host launcher, so it does not flash a PowerShell or Docker terminal during normal runs. Collection occurs only while the PC is on, the user is signed in, and internet access is available; after sleep or shutdown, the next available run catches up from the newest overlap. Remove only the schedule with `scripts/uninstall-production-refresh-task.ps1`; this does not remove raw data, permanent history, reviews, or backups.
+
+Install the local verified daily backup schedule separately:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\setup-encrypted-offsite-backup.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\install-production-backup-task.ps1
+```
+
+The one-time setup keeps plaintext archives under the current Windows user's
+local application-data folder and sends only authenticated encrypted
+`.cpbackup.p7m` copies to the registered OneDrive folder. It creates a
+password-protected recovery bundle in OneDrive and a recovery-code file outside
+OneDrive. Save both values from that recovery code in a password manager or on
+paper; neither the repository nor OneDrive contains them. Setup performs a real
+decrypt, authentication, and checksum test with the exported recovery bundle
+before publishing its configuration.
+
+The schedule default is 07:10 UTC—3:10 AM EDT or 2:10 AM EST—between the normal
+15-minute refresh boundaries. The UTC boundary keeps the schedule stable through
+daylight-saving and Windows time-zone changes. It starts the missed backup after
+the next sign-in if the PC was off, waits for any refresh to finish, excludes
+only re-downloadable raw ZIP files, encrypts and verifies the off-device copy,
+and runs through the same hidden launcher. Remove only this schedule with
+`scripts/uninstall-production-backup-task.ps1`; existing local and encrypted
+backup archives are retained.
 
 ## First paid server
 
@@ -82,6 +107,7 @@ CRISISPULSE_HTTP_PORT=80
 CRISISPULSE_HTTPS_PORT=443
 CRISISPULSE_STATE_VOLUME=crisispulse_crisis_state
 CRISISPULSE_WORK_VOLUME=crisispulse_crisis_work
+CRISISPULSE_REFRESH_CPUS=0.75
 ```
 
 Point the domain to the server, allow inbound TCP ports 80 and 443, and run `sh production/deploy.sh`. Do not place card details, passwords, or the plaintext pilot password in the repository or this chat.
@@ -105,7 +131,7 @@ The unit files assume the repository is at `/opt/crisispulse`.
 - Refresh logs: `sudo journalctl -u crisispulse-refresh.service`
 - Application status: `docker compose --env-file .env.production -f compose.production.yml ps`
 - Manual backup: `docker compose --env-file .env.production -f compose.production.yml --profile maintenance run --rm backup`
-- Latest sanitized backup verification: `cat backups/backup-status.json`
+- Latest sanitized backup verification: read `backup-status.json` from the directory configured by `CRISISPULSE_BACKUP_DIR`.
 
 Every successful backup is fully listed before publication, requires the core
 dashboard/status/history files, rejects unsafe and non-file entries, writes an
@@ -113,9 +139,28 @@ adjacent `.sha256` sidecar for that exact archive, and updates
 `backups/backup-status.json` atomically. A failed run records only `failed`; it
 does not expose host paths or raw tool errors through the API. The archive
 includes `reviews.jsonl` and `article-reviews.jsonl` whenever they exist. The
-same-server copy is operational convenience, not disaster recovery: copy the
-verified archive and checksum to encrypted off-server storage before accepting
-paid review work.
+same-server copy is operational convenience, not disaster recovery. On the
+Windows pilot, `run-production-backup.ps1` encrypts the exact archive named by
+the verified status, decrypts it again to verify size and SHA-256, then publishes
+it atomically in OneDrive. A file in the local OneDrive folder is not proof of a
+completed upload; confirm the encrypted file and `Recovery` folder are visible
+on OneDrive's website before accepting paid review work.
+
+After total PC loss, clone this repository, download an encrypted `.cpbackup.p7m` file
+and the password-protected PFX from OneDrive, then run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\restore-encrypted-offsite-backup.ps1 `
+  -EncryptedBackupPath "C:\path\to\crisispulse-YYYYMMDDTHHMMSSZ.tar.gz.cpbackup.p7m" `
+  -RecoveryBundlePath "C:\path\to\CrisisPulse-Backup-Recovery-v2.pfx"
+```
+
+The command prompts for the separately saved recovery password and
+authentication key, decrypts without installing the private key, verifies the
+authentication tag, size, and SHA-256, checks the tar archive, and refuses to
+overwrite an existing restored file. Windows PowerShell caps this in-memory
+format at 64 MiB per local archive; migrate to a streaming authenticated format
+before backups approach that boundary.
 
 ## Restore drill with fresh volumes
 

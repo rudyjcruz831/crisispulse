@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/csv"
 	"encoding/json"
-	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -53,14 +52,99 @@ const testQualitySample = `{
   ]
 }`
 
+const testSmartQualitySample = `{
+  "version": 2,
+  "sample_date": "2026-08-28",
+  "archive_articles": 31700,
+  "eligible_articles": 20449,
+  "queue_candidate_articles": 20385,
+  "selection_intent": {
+    "strategy": "training_readiness_v1",
+    "target": "cpu_smoke",
+    "usable_rows": 62,
+    "usable_rows_minimum": 16,
+    "class_counts": {
+      "reported_flooding": 25,
+      "flood_risk_warning": 4,
+      "heavy_rain_only": 3,
+      "not_flood_related": 30
+    },
+    "class_minimum": 4,
+    "distinct_article_dates": 9,
+    "article_date_minimum": 3,
+    "publisher_groups": 59,
+    "publisher_group_minimum": 12,
+    "inference_text_coverage": 0.96875,
+    "inference_text_minimum": 1.0,
+    "split_class_counts": {
+      "training": {"reported_flooding": 18, "flood_risk_warning": 4, "heavy_rain_only": 2, "not_flood_related": 19},
+      "validation": {"reported_flooding": 3, "flood_risk_warning": 0, "heavy_rain_only": 0, "not_flood_related": 6},
+      "test": {"reported_flooding": 4, "flood_risk_warning": 0, "heavy_rain_only": 1, "not_flood_related": 4}
+    },
+    "split_class_minimums": {"training": 2, "validation": 1, "test": 1},
+    "readiness_status": "computed",
+    "production_minimums": {
+      "total_usable_rows": 500,
+      "class_minimum": 100,
+      "article_dates": 30,
+      "publisher_groups": 100,
+      "inference_text_coverage": 0.95,
+      "split_class_minimums": {"training": 60, "validation": 15, "test": 20}
+    }
+  },
+  "articles": [
+    {
+      "article_id": "0000000000000000000000000000000000000000000000000000000000000000",
+      "seen_at": "2026-08-28T10:00:00Z",
+      "title": "Heavy rain closes roads across the county",
+      "title_source": "publisher_metadata",
+      "url": "https://news.example/heavy-rain-closes-roads",
+      "source_domain": "news.example",
+      "location_name": "New Jersey",
+      "match_strength": "weak",
+      "review_bucket": "ambiguous_match",
+      "review_reason": "Ambiguous flood tag; retained for audit but blocked from alerts",
+      "themes": ["NATURAL_DISASTER_FLOODING"],
+      "quality_flags": [],
+      "selection_intent": {
+        "rank": 1,
+        "sampling_split": "validation",
+        "reasons": ["underrepresented_class", "underrepresented_split", "inference_text_available"]
+      }
+    },
+    {
+      "article_id": "1111111111111111111111111111111111111111111111111111111111111111",
+      "seen_at": "2026-08-28T11:00:00Z",
+      "title": "Flood watch issued for the weekend",
+      "title_source": "url_path",
+      "url": "https://weather.example/flood-watch-weekend",
+      "source_domain": "weather.example",
+      "location_name": "Pennsylvania",
+      "match_strength": "high",
+      "review_bucket": "high_match",
+      "review_reason": "Explicit flood theme; allowed to contribute to alerts",
+      "themes": ["NATURAL_DISASTER_FLOODING"],
+      "quality_flags": [],
+      "selection_intent": {
+        "rank": 2,
+        "reasons": ["underrepresented_split", "new_publisher_group"]
+      }
+    }
+  ]
+}`
+
 func testQualityHandlerWithReviewPath(t *testing.T) (http.Handler, string) {
+	return testQualityHandlerWithSample(t, testQualitySample)
+}
+
+func testQualityHandlerWithSample(t *testing.T, sample string) (http.Handler, string) {
 	t.Helper()
 	root := t.TempDir()
 	dataPath := filepath.Join(root, "dashboard.json")
 	if err := os.WriteFile(dataPath, []byte(testDashboard), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "quality-review-sample.json"), []byte(testQualitySample), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "quality-review-sample.json"), []byte(sample), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	reviewPath := filepath.Join(root, "reviews.jsonl")
@@ -76,12 +160,31 @@ func testQualityHandler(t *testing.T) http.Handler {
 
 func postQualityDecision(t *testing.T, handler http.Handler, articleID, decision string) *httptest.ResponseRecorder {
 	t.Helper()
-	return postQualityReview(t, handler, articleID, decision, nil)
+	return postQualityReview(t, handler, newProtocolArticleReviewRequest(articleID, decision))
 }
 
-func postQualityReview(t *testing.T, handler http.Handler, articleID, decision string, tags []string) *httptest.ResponseRecorder {
+func newProtocolArticleReviewRequest(articleID, decision string) articleReviewRequest {
+	input := articleReviewRequest{
+		ArticleID:             articleID,
+		Decision:              decision,
+		ReviewProtocolVersion: articleReviewProtocolV1,
+		ReviewBasis:           "headline_only",
+		HeadlineSupport:       "sufficient",
+	}
+	if decision == "not_flood_related" {
+		input.NoSignalReason = "unrelated_false_match"
+	}
+	if decision == "uncertain" {
+		input.ReviewBasis = "unavailable"
+		input.HeadlineSupport = ""
+		input.UncertaintyReason = "page_unavailable"
+	}
+	return input
+}
+
+func postQualityReview(t *testing.T, handler http.Handler, input articleReviewRequest) *httptest.ResponseRecorder {
 	t.Helper()
-	body, err := json.Marshal(articleReviewRequest{ArticleID: articleID, Decision: decision, Tags: tags})
+	body, err := json.Marshal(input)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,10 +196,13 @@ func postQualityReview(t *testing.T, handler http.Handler, articleID, decision s
 	return response
 }
 
-func TestQualityArticleReviewNormalizesDeduplicatesAndPersistsTags(t *testing.T) {
+func TestQualityArticleReviewPersistsProtocolEvidence(t *testing.T) {
 	handler := testQualityHandler(t)
-	tags := []string{" Hawaii Rain ", "HAWAII---RAIN", "Woman’s Death", " ÉVACUATION / 東京 "}
-	response := postQualityReview(t, handler, strings.Repeat("0", 64), "reported_flooding", tags)
+	input := newProtocolArticleReviewRequest(strings.Repeat("0", 64), "reported_flooding")
+	input.ReviewBasis = "full_article"
+	input.ImpactFlags = []string{"fatality", "evacuation_displacement"}
+	input.ContextFlags = []string{"aftermath_recovery", "climate_background"}
+	response := postQualityReview(t, handler, input)
 	if response.Code != http.StatusCreated {
 		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
 	}
@@ -104,9 +210,17 @@ func TestQualityArticleReviewNormalizesDeduplicatesAndPersistsTags(t *testing.T)
 	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
 		t.Fatal(err)
 	}
-	wantTags := "hawaii-rain,woman-s-death,évacuation-東京"
-	if got := strings.Join(result.Review.Tags, ","); got != wantTags {
-		t.Fatalf("response tags = %q, want %q", got, wantTags)
+	if result.Review.ReviewProtocolVersion != articleReviewProtocolV1 || result.Review.ReviewBasis != "full_article" || result.Review.HeadlineSupport != "sufficient" {
+		t.Fatalf("response protocol = %+v", result.Review)
+	}
+	if got := strings.Join(result.Review.ImpactFlags, ","); got != "fatality,evacuation_displacement" {
+		t.Fatalf("response impact flags = %q", got)
+	}
+	if got := strings.Join(result.Review.ContextFlags, ","); got != "aftermath_recovery,climate_background" {
+		t.Fatalf("response context flags = %q", got)
+	}
+	if result.Review.TitleSource != "manual_override" {
+		t.Fatalf("response title source = %q", result.Review.TitleSource)
 	}
 
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/quality/articles", nil)
@@ -119,8 +233,8 @@ func TestQualityArticleReviewNormalizesDeduplicatesAndPersistsTags(t *testing.T)
 	if err := json.Unmarshal(listResponse.Body.Bytes(), &sample); err != nil {
 		t.Fatal(err)
 	}
-	if len(sample.Articles) == 0 || strings.Join(sample.Articles[0].Tags, ",") != wantTags {
-		t.Fatalf("quality article tags = %#v", sample.Articles)
+	if len(sample.Articles) == 0 || sample.Articles[0].ReviewProtocolVersion != articleReviewProtocolV1 || strings.Join(sample.Articles[0].ImpactFlags, ",") != "fatality,evacuation_displacement" {
+		t.Fatalf("quality article protocol = %#v", sample.Articles)
 	}
 }
 
@@ -157,6 +271,62 @@ func TestQualityArticleReviewFlow(t *testing.T) {
 	}
 }
 
+func TestQualityArticleReviewFlowPreservesSmartQueueIntent(t *testing.T) {
+	handler, _ := testQualityHandlerWithSample(t, testSmartQualitySample)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/quality/articles", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var sample qualitySampleFile
+	if err := json.Unmarshal(response.Body.Bytes(), &sample); err != nil {
+		t.Fatal(err)
+	}
+	if sample.Version != 2 || sample.SelectionIntent == nil || sample.SelectionIntent.Target != "cpu_smoke" || sample.SelectionIntent.UsableRows != 62 {
+		t.Fatalf("selection intent = %+v", sample.SelectionIntent)
+	}
+	if len(sample.Articles) != 2 || sample.Articles[0].SelectionIntent == nil || sample.Articles[0].SelectionIntent.Rank != 1 || sample.Articles[0].SelectionIntent.SamplingSplit != "validation" {
+		t.Fatalf("smart queue articles = %+v", sample.Articles)
+	}
+
+	postResponse := postQualityDecision(t, handler, strings.Repeat("0", 64), "heavy_rain_only")
+	if postResponse.Code != http.StatusCreated {
+		t.Fatalf("post status = %d, body = %s", postResponse.Code, postResponse.Body.String())
+	}
+}
+
+func TestQualityArticleReviewTreatsCompletedSmartQueueAsHealthy(t *testing.T) {
+	var sample qualitySampleFile
+	if err := json.Unmarshal([]byte(testSmartQualitySample), &sample); err != nil {
+		t.Fatal(err)
+	}
+	sample.Articles = []qualityArticle{}
+	sample.QueueCandidateArticles = 0
+	encoded, err := json.Marshal(sample)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, _ := testQualityHandlerWithSample(t, string(encoded))
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/quality/articles", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"articles":[]`) {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+}
+
+func TestQualityArticleReviewRejectsInvalidSmartQueueRank(t *testing.T) {
+	invalid := strings.Replace(testSmartQualitySample, `"rank": 2`, `"rank": 1`, 1)
+	handler, _ := testQualityHandlerWithSample(t, invalid)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/quality/articles", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+}
+
 func TestQualityArticleReviewAcceptsEverySchemaV2Decision(t *testing.T) {
 	decisions := []string{"reported_flooding", "flood_risk_warning", "heavy_rain_only", "not_flood_related", "uncertain"}
 	for _, decision := range decisions {
@@ -189,36 +359,63 @@ func TestQualityArticleReviewRejectsLegacyAndInvalidDecisions(t *testing.T) {
 	}
 }
 
-func TestQualityArticleReviewRejectsInvalidTags(t *testing.T) {
-	nineTags := make([]string, 9)
-	for index := range nineTags {
-		nineTags[index] = fmt.Sprintf("tag-%d", index)
+func TestQualityArticleReviewRejectsInvalidProtocolCombinations(t *testing.T) {
+	tests := map[string]func(*articleReviewRequest){
+		"missing protocol":                  func(input *articleReviewRequest) { input.ReviewProtocolVersion = 0 },
+		"invalid basis":                     func(input *articleReviewRequest) { input.ReviewBasis = "browser_guess" },
+		"resolved missing headline support": func(input *articleReviewRequest) { input.HeadlineSupport = "" },
+		"headline only body required":       func(input *articleReviewRequest) { input.HeadlineSupport = "body_required" },
+		"resolved unavailable":              func(input *articleReviewRequest) { input.ReviewBasis = "unavailable" },
+		"not flood missing reason": func(input *articleReviewRequest) {
+			input.Decision = "not_flood_related"
+			input.NoSignalReason = ""
+		},
+		"other class with no signal reason": func(input *articleReviewRequest) { input.NoSignalReason = "unrelated_false_match" },
+		"uncertain missing reason": func(input *articleReviewRequest) {
+			input.Decision = "uncertain"
+			input.ReviewBasis = "unavailable"
+			input.HeadlineSupport = ""
+		},
+		"uncertain with headline support": func(input *articleReviewRequest) {
+			input.Decision = "uncertain"
+			input.ReviewBasis = "full_article"
+			input.UncertaintyReason = "insufficient_or_conflicting"
+		},
+		"unknown impact":   func(input *articleReviewRequest) { input.ImpactFlags = []string{"business_loss"} },
+		"duplicate impact": func(input *articleReviewRequest) { input.ImpactFlags = []string{"fatality", "fatality"} },
+		"unknown context":  func(input *articleReviewRequest) { input.ContextFlags = []string{"breaking_news"} },
+		"duplicate context": func(input *articleReviewRequest) {
+			input.ContextFlags = []string{"climate_background", "climate_background"}
+		},
 	}
-	tests := map[string][]string{
-		"no letters or digits": {" -- !!! "},
-		"too many":             nineTags,
-		"too long":             {strings.Repeat("雨", maximumArticleTagRunes+1)},
-	}
-	for name, tags := range tests {
+	for name, mutate := range tests {
 		t.Run(name, func(t *testing.T) {
 			handler := testQualityHandler(t)
-			response := postQualityReview(t, handler, strings.Repeat("0", 64), "reported_flooding", tags)
+			input := newProtocolArticleReviewRequest(strings.Repeat("0", 64), "reported_flooding")
+			mutate(&input)
+			response := postQualityReview(t, handler, input)
 			if response.Code != http.StatusBadRequest {
 				t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
 			}
 		})
 	}
+}
 
-	handler := testQualityHandler(t)
-	response := postQualityReview(t, handler, strings.Repeat("0", 64), "reported_flooding", []string{strings.Repeat("雨", maximumArticleTagRunes)})
-	if response.Code != http.StatusCreated {
-		t.Fatalf("32-code-point Unicode tag status = %d, body = %s", response.Code, response.Body.String())
+func TestQualityArticleReviewRejectsFreeFormTags(t *testing.T) {
+	for _, tags := range [][]string{{}, {"fatality"}} {
+		handler := testQualityHandler(t)
+		input := newProtocolArticleReviewRequest(strings.Repeat("0", 64), "reported_flooding")
+		input.Tags = &tags
+		response := postQualityReview(t, handler, input)
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("tags %#v status = %d, body = %s", tags, response.Code, response.Body.String())
+		}
 	}
 }
 
 func TestQualityReviewRejectsArticleOutsideCurrentSample(t *testing.T) {
 	handler := testQualityHandler(t)
-	body := `{"article_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","decision":"reported_flooding"}`
+	body := `{"article_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","decision":"reported_flooding","review_protocol_version":1,"review_basis":"headline_only","headline_support":"sufficient"}`
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/quality/articles", bytes.NewBufferString(body))
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
@@ -280,15 +477,20 @@ func TestArticleReviewCorrectionAppendsAuditAndLatestIsSchemaV2(t *testing.T) {
 	article := qualityArticle{
 		ArticleID:     strings.Repeat("0", 64),
 		Title:         "Corrected flood-risk label",
+		TitleSource:   "publisher_metadata",
 		URL:           "https://news.example/legacy-flood",
 		SourceDomain:  "news.example",
 		MatchStrength: "high",
 		ReviewBucket:  "high_match",
 	}
-	if _, err := store.save(article, "flood_risk_warning", []string{"hawaii-rain", "fatality"}); err != nil {
+	riskInput := newProtocolArticleReviewRequest(article.ArticleID, "flood_risk_warning")
+	riskInput.ImpactFlags = []string{"fatality"}
+	if _, err := store.save(article, riskInput); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.save(article, "reported_flooding", []string{"fatality", "flash-flood"}); err != nil {
+	reportedInput := newProtocolArticleReviewRequest(article.ArticleID, "reported_flooding")
+	reportedInput.ImpactFlags = []string{"fatality", "property_crop_damage"}
+	if _, err := store.save(article, reportedInput); err != nil {
 		t.Fatal(err)
 	}
 	raw, err := os.ReadFile(reviewPath)
@@ -296,14 +498,14 @@ func TestArticleReviewCorrectionAppendsAuditAndLatestIsSchemaV2(t *testing.T) {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
-	if len(lines) != 3 || !strings.Contains(lines[0], `"decision":"relevant"`) || !strings.Contains(lines[1], `"tags":["hawaii-rain","fatality"]`) || !strings.Contains(lines[2], `"tags":["fatality","flash-flood"]`) {
+	if len(lines) != 3 || !strings.Contains(lines[0], `"decision":"relevant"`) || !strings.Contains(lines[1], `"title_source":"publisher_metadata"`) || !strings.Contains(lines[1], `"review_protocol_version":1`) || !strings.Contains(lines[2], `"impact_flags":["fatality","property_crop_damage"]`) {
 		t.Fatalf("audit log = %s", raw)
 	}
 	reviews, err := store.list()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(reviews) != 1 || reviews[0].Decision != "reported_flooding" || reviews[0].DecisionSchemaVersion != 2 || strings.Join(reviews[0].Tags, ",") != "fatality,flash-flood" {
+	if len(reviews) != 1 || reviews[0].Decision != "reported_flooding" || reviews[0].DecisionSchemaVersion != 2 || reviews[0].ReviewProtocolVersion != 1 || reviews[0].TitleSource != "publisher_metadata" || strings.Join(reviews[0].ImpactFlags, ",") != "fatality,property_crop_damage" {
 		t.Fatalf("latest reviews = %+v", reviews)
 	}
 }
@@ -341,6 +543,18 @@ func TestStoredArticleReviewRequiresCanonicalSchemaV2Tags(t *testing.T) {
 	if err := validateStoredArticleReview(base); err != nil {
 		t.Fatalf("canonical v2 tags rejected: %v", err)
 	}
+	for _, source := range []string{"manual_override", "publisher_metadata", "url_path", "unavailable"} {
+		record := base
+		record.TitleSource = source
+		if err := validateStoredArticleReview(record); err != nil {
+			t.Fatalf("valid title source %q rejected: %v", source, err)
+		}
+	}
+	base.TitleSource = "browser_supplied"
+	if err := validateStoredArticleReview(base); err == nil {
+		t.Fatal("invalid title source was accepted")
+	}
+	base.TitleSource = ""
 	base.DecisionSchemaVersion = 1
 	base.Decision = "relevant"
 	if err := validateStoredArticleReview(base); err == nil {
@@ -399,7 +613,11 @@ func TestArticleQualitySummaryUsesOnlyResolvedSchemaV2ForReadiness(t *testing.T)
 
 func TestArticleQualityCSVExportIncludesDecisionSchemaVersion(t *testing.T) {
 	handler := testQualityHandler(t)
-	response := postQualityReview(t, handler, strings.Repeat("0", 64), "heavy_rain_only", []string{"Storm Damage", "Hawaii/Flood"})
+	input := newProtocolArticleReviewRequest(strings.Repeat("0", 64), "heavy_rain_only")
+	input.ReviewBasis = "full_article"
+	input.ImpactFlags = []string{"transport_disruption"}
+	input.ContextFlags = []string{"climate_background"}
+	response := postQualityReview(t, handler, input)
 	if response.Code != http.StatusCreated {
 		t.Fatalf("post status = %d, body = %s", response.Code, response.Body.String())
 	}
@@ -414,7 +632,7 @@ func TestArticleQualityCSVExportIncludesDecisionSchemaVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) != 2 || len(rows[0]) != 10 || rows[0][7] != "decision_schema_version" || rows[0][9] != "tags" || rows[1][6] != "heavy_rain_only" || rows[1][7] != "2" || rows[1][9] != "storm-damage|hawaii-flood" {
+	if len(rows) != 2 || len(rows[0]) != 18 || rows[0][2] != "title_source" || rows[0][8] != "decision_schema_version" || rows[0][10] != "tags" || rows[0][11] != "review_protocol_version" || rows[1][2] != "manual_override" || rows[1][7] != "heavy_rain_only" || rows[1][8] != "2" || rows[1][11] != "1" || rows[1][12] != "full_article" || rows[1][16] != "transport_disruption" || rows[1][17] != "climate_background" {
 		t.Fatalf("CSV rows = %#v", rows)
 	}
 }
@@ -458,6 +676,7 @@ func TestTrainingArticlesReturnsLatestLabelsWithEligibilitySummary(t *testing.T)
 		trainingReviewFixture("5", "relevant", 1, "2026-08-24T15:00:00Z"),
 	}
 	reviews[0].Tags = []string{"flash-flood", "fatality"}
+	reviews[0].TitleSource = "publisher_metadata"
 	writeTrainingReviewFixtures(t, reviewPath, reviews)
 
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/training/articles", nil)
@@ -509,6 +728,50 @@ func TestTrainingArticlesReturnsLatestLabelsWithEligibilitySummary(t *testing.T)
 	if got := strings.Join(byDecision["reported_flooding"].Tags, ","); got != "flash-flood,fatality" {
 		t.Fatalf("eligible tags = %q", got)
 	}
+	if got := byDecision["reported_flooding"].TitleSource; got != "publisher_metadata" {
+		t.Fatalf("eligible title source = %q", got)
+	}
+}
+
+func TestTrainingArticlesExcludeProtocolReviewsWithoutHeadlineSupport(t *testing.T) {
+	handler, reviewPath := testQualityHandlerWithReviewPath(t)
+	makeProtocolRecord := func(idCharacter, headlineSupport string) articleReviewRecord {
+		record := trainingReviewFixture(idCharacter, "reported_flooding", articleDecisionSchemaV2, "2026-08-24T10:00:00Z")
+		record.ReviewProtocolVersion = articleReviewProtocolV1
+		record.ReviewBasis = "full_article"
+		record.HeadlineSupport = headlineSupport
+		return record
+	}
+	writeTrainingReviewFixtures(t, reviewPath, []articleReviewRecord{
+		makeProtocolRecord("0", "sufficient"),
+		makeProtocolRecord("1", "body_required"),
+		makeProtocolRecord("2", "conflicts_with_body"),
+	})
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/training/articles", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var result trainingArticlesResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Summary.TrainingEligible != 1 || result.Summary.Excluded != 2 || result.Summary.ExclusionReasonCounts["headline_not_sufficient"] != 2 {
+		t.Fatalf("summary = %+v", result.Summary)
+	}
+	for _, article := range result.Articles {
+		if article.HeadlineSupport == "sufficient" {
+			if !article.TrainingEligible || article.ExclusionReason != "" {
+				t.Fatalf("sufficient article = %+v", article)
+			}
+			continue
+		}
+		if article.TrainingEligible || article.ExclusionReason != "headline_not_sufficient" {
+			t.Fatalf("headline-insufficient article = %+v", article)
+		}
+	}
 }
 
 func TestTrainingArticlesEmptyStoreHasStableZeroCounts(t *testing.T) {
@@ -526,7 +789,7 @@ func TestTrainingArticlesEmptyStoreHasStableZeroCounts(t *testing.T) {
 	if result.Summary.TotalArticles != 0 || result.Summary.TrainingEligible != 0 || result.Summary.Excluded != 0 || len(result.Articles) != 0 {
 		t.Fatalf("response = %+v", result)
 	}
-	if len(result.Summary.ClassCounts) != 4 || len(result.Summary.ExclusionReasonCounts) != 2 {
+	if len(result.Summary.ClassCounts) != 4 || len(result.Summary.ExclusionReasonCounts) != 3 {
 		t.Fatalf("stable count keys are missing: %+v", result.Summary)
 	}
 }
@@ -534,11 +797,11 @@ func TestTrainingArticlesEmptyStoreHasStableZeroCounts(t *testing.T) {
 func TestTrainingArticlesCorrectionUsesLatestWhileHistoryRemainsAppendOnly(t *testing.T) {
 	handler, reviewPath := testQualityHandlerWithReviewPath(t)
 	articleID := strings.Repeat("0", 64)
-	first := postQualityReview(t, handler, articleID, "reported_flooding", []string{"flash-flood"})
+	first := postQualityReview(t, handler, newProtocolArticleReviewRequest(articleID, "reported_flooding"))
 	if first.Code != http.StatusCreated {
 		t.Fatalf("first review = %d %s", first.Code, first.Body.String())
 	}
-	correction := postQualityReview(t, handler, articleID, "uncertain", []string{"needs-context"})
+	correction := postQualityReview(t, handler, newProtocolArticleReviewRequest(articleID, "uncertain"))
 	if correction.Code != http.StatusCreated {
 		t.Fatalf("correction = %d %s", correction.Code, correction.Body.String())
 	}
@@ -561,7 +824,7 @@ func TestTrainingArticlesCorrectionUsesLatestWhileHistoryRemainsAppendOnly(t *te
 		t.Fatalf("response = %+v", result)
 	}
 	article := result.Articles[0]
-	if article.Decision != "uncertain" || article.TrainingEligible || article.ExclusionReason != "uncertain" || strings.Join(article.Tags, ",") != "needs-context" {
+	if article.Decision != "uncertain" || article.TrainingEligible || article.ExclusionReason != "uncertain" || article.ReviewProtocolVersion != articleReviewProtocolV1 || article.UncertaintyReason != "page_unavailable" {
 		t.Fatalf("latest correction = %+v", article)
 	}
 }
@@ -571,6 +834,7 @@ func TestTrainingArticleCSVIsExcelCompatibleAudit(t *testing.T) {
 	eligible := trainingReviewFixture("0", "reported_flooding", articleDecisionSchemaV2, "2026-08-24T10:00:00Z")
 	eligible.Title = `=HYPERLINK("https://malicious.example","click")`
 	eligible.SourceDomain = "\tnews.example"
+	eligible.TitleSource = "publisher_metadata"
 	eligible.Tags = []string{"flash-flood", "fatality"}
 	legacy := trainingReviewFixture("1", "not_relevant", 1, "2026-08-24T11:00:00Z")
 	writeTrainingReviewFixtures(t, reviewPath, []articleReviewRecord{eligible, legacy})
@@ -592,17 +856,17 @@ func TestTrainingArticleCSVIsExcelCompatibleAudit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) != 3 || len(rows[0]) != 12 || rows[0][10] != "training_eligible" || rows[0][11] != "exclusion_reason" {
+	if len(rows) != 3 || len(rows[0]) != 20 || rows[0][2] != "title_source" || rows[0][11] != "training_eligible" || rows[0][12] != "exclusion_reason" || rows[0][13] != "review_protocol_version" || rows[0][19] != "context_flags" {
 		t.Fatalf("CSV rows = %#v", rows)
 	}
 	byDecision := make(map[string][]string, 2)
 	for _, row := range rows[1:] {
-		byDecision[row[6]] = row
+		byDecision[row[7]] = row
 	}
-	if row := byDecision["reported_flooding"]; row[1] != `'=HYPERLINK("https://malicious.example","click")` || row[3] != "'\tnews.example" || row[9] != "flash-flood|fatality" || row[10] != "true" || row[11] != "" {
+	if row := byDecision["reported_flooding"]; row[1] != `'=HYPERLINK("https://malicious.example","click")` || row[2] != "publisher_metadata" || row[4] != "'\tnews.example" || row[10] != "flash-flood|fatality" || row[11] != "true" || row[12] != "" {
 		t.Fatalf("eligible CSV row = %#v", row)
 	}
-	if row := byDecision["not_relevant"]; row[10] != "false" || row[11] != "legacy_schema" {
+	if row := byDecision["not_relevant"]; row[11] != "false" || row[12] != "legacy_schema" {
 		t.Fatalf("legacy CSV row = %#v", row)
 	}
 }

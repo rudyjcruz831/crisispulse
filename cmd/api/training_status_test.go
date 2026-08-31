@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -95,6 +96,58 @@ func baselineReadiness(smoke, computed bool) map[string]any {
 	}
 }
 
+func baselineEvaluation(matrix [][]int) map[string]any {
+	columns := make([]int, len(articleBaselineClassLabels))
+	rows := make([]int, len(articleBaselineClassLabels))
+	diagonal := 0
+	for rowIndex, row := range matrix {
+		for columnIndex, count := range row {
+			rows[rowIndex] += count
+			columns[columnIndex] += count
+			if rowIndex == columnIndex {
+				diagonal += count
+			}
+		}
+	}
+	round := func(value float64) float64 {
+		return math.Round(value*1_000_000) / 1_000_000
+	}
+	ratio := func(numerator, denominator int) float64 {
+		if denominator == 0 {
+			return 0
+		}
+		return float64(numerator) / float64(denominator)
+	}
+	perClass := make(map[string]any, len(articleBaselineClassLabels))
+	macroF1 := 0.0
+	for index, label := range articleBaselineClassLabels {
+		precision := ratio(matrix[index][index], columns[index])
+		recall := ratio(matrix[index][index], rows[index])
+		f1 := 0.0
+		if precision+recall > 0 {
+			f1 = 2 * precision * recall / (precision + recall)
+		}
+		macroF1 += f1
+		perClass[label] = map[string]any{
+			"precision": round(precision),
+			"recall":    round(recall),
+			"f1":        round(f1),
+			"support":   rows[index],
+		}
+	}
+	total := 0
+	for _, count := range rows {
+		total += count
+	}
+	return map[string]any{
+		"accuracy":                     round(ratio(diagonal, total)),
+		"macro_f1":                     round(macroF1 / float64(len(articleBaselineClassLabels))),
+		"per_class":                    perClass,
+		"confusion_matrix":             matrix,
+		"confusion_matrix_label_order": articleBaselineClassLabels,
+	}
+}
+
 func baselineReportFixture(computed, trained bool) map[string]any {
 	rows := 4
 	status := "not_ready"
@@ -143,11 +196,37 @@ func baselineReportFixture(computed, trained bool) map[string]any {
 		"interpretation":                  map[string]any{"production_claim": "not production ready"},
 	}
 	if trained {
+		perfect := baselineEvaluation([][]int{{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}, {0, 0, 0, 1}})
+		swapped := baselineEvaluation([][]int{{0, 1, 0, 0}, {1, 0, 0, 0}, {0, 0, 1, 0}, {0, 0, 0, 1}})
 		report["status"] = "non_evaluative_smoke_test_completed"
 		report["evaluation_tier"] = "NON_EVALUATIVE_SMOKE_TEST"
-		report["metrics"] = map[string]any{"private_detail": "not exposed"}
+		report["metrics"] = map[string]any{
+			"model": map[string]any{
+				"type":       articleBaselineModelType,
+				"validation": perfect,
+				"test":       swapped,
+			},
+			"comparators": map[string]any{
+				"dummy_prior_test":          swapped,
+				"frozen_keyword_rules_test": perfect,
+			},
+			"test_slices": map[string]any{"private_detail": "not exposed"},
+			"abstention": map[string]any{
+				"threshold":                   0.55,
+				"abstained_rows":              4,
+				"covered_rows":                0,
+				"coverage":                    0.0,
+				"covered_test_metrics":        nil,
+				"threshold_was_tuned_on_test": false,
+			},
+			"feature_dimensions": 64,
+		}
 		report["raw_predictions"] = `C:\private\predictions.parquet`
-		report["runtime"] = map[string]any{"execution_device": "CPU"}
+		report["runtime"] = map[string]any{
+			"scikit_learn_version": "1.9.0",
+			"random_seed":          42,
+			"execution_device":     "CPU",
+		}
 	}
 	return report
 }
@@ -185,6 +264,9 @@ func TestTrainingStatusReturnsSanitizedReadinessReport(t *testing.T) {
 	if result.Status != "not_ready" || result.TrainingPerformed || result.LatestReviewCount != 4 || result.ResolvedSchemaV2Count != 4 || result.UsableTrainingRows != 4 || result.BlockedReason != "readiness_gates_not_met" {
 		t.Fatalf("response = %+v", result)
 	}
+	if result.Results != nil {
+		t.Fatalf("untrained response exposed results: %+v", result.Results)
+	}
 	if result.DatasetFingerprint != "sha256:"+strings.Repeat("0", 64) {
 		t.Fatalf("dataset fingerprint = %q", result.DatasetFingerprint)
 	}
@@ -211,6 +293,52 @@ func TestTrainingStatusReturnsCompletedSmokeTierAndSplit(t *testing.T) {
 	}
 	if result.Split.ClassCounts["training"]["reported_flooding"] != 2 {
 		t.Fatalf("split class counts = %+v", result.Split.ClassCounts)
+	}
+	if result.Results == nil || result.Results.ModelType != articleBaselineModelType || result.Results.FeatureDimensions != 64 || result.Results.Runtime.ExecutionDevice != "CPU" || result.Results.Runtime.Library != "scikit-learn" || result.Results.Runtime.LibraryVersion != "1.9.0" || result.Results.Runtime.RandomSeed != 42 {
+		t.Fatalf("results = %+v", result.Results)
+	}
+	if result.Results.Validation.Accuracy != 1 || result.Results.Test.Accuracy != 0.5 || result.Results.Baselines.FrozenKeywordRulesTest.Accuracy != 1 || result.Results.Abstention.AbstainedRows != 4 || result.Results.Abstention.CoveredRows != 0 || len(result.Results.RepresentativeMistakes) != 2 {
+		t.Fatalf("results = %+v", result.Results)
+	}
+	firstMistake := result.Results.RepresentativeMistakes[0]
+	secondMistake := result.Results.RepresentativeMistakes[1]
+	if firstMistake.ActualLabel != "reported_flooding" || firstMistake.PredictedLabel != "flood_risk_warning" || firstMistake.Count != 1 || secondMistake.ActualLabel != "flood_risk_warning" || secondMistake.PredictedLabel != "reported_flooding" || secondMistake.Count != 1 {
+		t.Fatalf("representative mistakes = %+v", result.Results.RepresentativeMistakes)
+	}
+	for _, privateField := range []string{"raw_predictions", "test_slices", "covered_test_metrics", `C:\\private`} {
+		if strings.Contains(response.Body.String(), privateField) {
+			t.Fatalf("response exposed %q: %s", privateField, response.Body.String())
+		}
+	}
+}
+
+func TestTrainingStatusRejectsInconsistentTrainingMetrics(t *testing.T) {
+	handler, path := testTrainingStatusHandler(t)
+	report := baselineReportFixture(true, true)
+	metrics := report["metrics"].(map[string]any)
+	model := metrics["model"].(map[string]any)
+	testMetrics := model["test"].(map[string]any)
+	testMetrics["accuracy"] = 0.75
+	writeBaselineReport(t, path, report)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/training/status", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusServiceUnavailable || response.Body.String() != "{\"error\":\"training status report unavailable\"}\n" {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+}
+
+func TestTrainingStatusRejectsUnsafeTrainingRuntime(t *testing.T) {
+	handler, path := testTrainingStatusHandler(t)
+	report := baselineReportFixture(true, true)
+	runtime := report["runtime"].(map[string]any)
+	runtime["scikit_learn_version"] = "<script>"
+	writeBaselineReport(t, path, report)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/training/status", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
 	}
 }
 

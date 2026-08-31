@@ -54,9 +54,41 @@ CLASS_LABELS = (
 CLASS_SET = set(CLASS_LABELS)
 V2_LABELS = CLASS_SET | {"uncertain"}
 V1_LABELS = {"relevant", "not_relevant", "uncertain"}
+REVIEW_PROTOCOL_VERSION = 1
+REVIEW_BASES = {"full_article", "publisher_summary", "headline_only", "unavailable"}
+HEADLINE_SUPPORT_VALUES = {"sufficient", "body_required", "conflicts_with_body"}
+NO_SIGNAL_REASONS = {
+    "flood_context_analysis",
+    "other_weather_non_flood",
+    "unrelated_false_match",
+}
+UNCERTAINTY_REASONS = {
+    "access_blocked",
+    "page_unavailable",
+    "wrong_or_junk_page",
+    "multi_story_page",
+    "language_barrier",
+    "insufficient_or_conflicting",
+}
+IMPACT_FLAGS = {
+    "fatality",
+    "injury",
+    "evacuation_displacement",
+    "rescue_search",
+    "property_crop_damage",
+    "transport_disruption",
+    "utility_disruption",
+}
+CONTEXT_FLAGS = {
+    "aftermath_recovery",
+    "climate_background",
+    "historical_background",
+    "policy_preparedness",
+}
 ALLOWED_REVIEW_FIELDS = {
     "article_id",
     "title",
+    "title_source",
     "url",
     "source_domain",
     "match_strength",
@@ -64,11 +96,26 @@ ALLOWED_REVIEW_FIELDS = {
     "decision",
     "decision_schema_version",
     "tags",
+    "review_protocol_version",
+    "review_basis",
+    "headline_support",
+    "no_signal_reason",
+    "uncertainty_reason",
+    "impact_flags",
+    "context_flags",
     "reviewed_at",
 }
 REQUIRED_REVIEW_FIELDS = ALLOWED_REVIEW_FIELDS - {
     "decision_schema_version",
     "tags",
+    "title_source",
+    "review_protocol_version",
+    "review_basis",
+    "headline_support",
+    "no_signal_reason",
+    "uncertainty_reason",
+    "impact_flags",
+    "context_flags",
 }
 REQUIRED_ARCHIVE_COLUMNS = {
     "article_id",
@@ -83,6 +130,13 @@ PUBLISHER_TITLE_SOURCE_COLUMNS = (
     "title_source",
 )
 PUBLISHER_METADATA_SOURCES = {"publisher_metadata"}
+REVIEW_TITLE_SOURCES = {
+    "",
+    "manual_override",
+    "publisher_metadata",
+    "url_path",
+    "unavailable",
+}
 OPTIONAL_GEOGRAPHY_COLUMNS = {
     "location_name",
     "country_code",
@@ -164,6 +218,118 @@ def _parse_timestamp(value: Any, *, field: str) -> datetime:
     return parsed.astimezone(UTC)
 
 
+def _validate_protocol_flags(
+    value: Any,
+    *,
+    field: str,
+    allowed: set[str],
+    line_number: int,
+) -> list[str]:
+    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+        raise ValueError(f"article review line {line_number} has invalid {field}")
+    if len(set(value)) != len(value) or any(item not in allowed for item in value):
+        raise ValueError(f"article review line {line_number} has invalid {field}")
+    return value
+
+
+def _validate_review_protocol(
+    record: dict[str, Any],
+    *,
+    decision: str,
+    schema_version: int,
+    line_number: int,
+) -> None:
+    protocol_version = record.get("review_protocol_version", 0)
+    if isinstance(protocol_version, bool) or not isinstance(protocol_version, int):
+        raise ValueError(
+            f"article review line {line_number} has an invalid review_protocol_version"
+        )
+    protocol_fields = {
+        "review_protocol_version",
+        "review_basis",
+        "headline_support",
+        "no_signal_reason",
+        "uncertainty_reason",
+        "impact_flags",
+        "context_flags",
+    }
+    if protocol_version == 0:
+        if protocol_fields.intersection(record):
+            raise ValueError(
+                f"article review line {line_number} has protocol fields without protocol 1"
+            )
+        return
+    if protocol_version != REVIEW_PROTOCOL_VERSION or schema_version != 2:
+        raise ValueError(
+            f"article review line {line_number} has an invalid review protocol"
+        )
+    if "tags" in record:
+        raise ValueError(
+            f"article review line {line_number} gives free-form tags to protocol 1"
+        )
+
+    review_basis = record.get("review_basis")
+    headline_support = record.get("headline_support", "")
+    no_signal_reason = record.get("no_signal_reason", "")
+    uncertainty_reason = record.get("uncertainty_reason", "")
+    if review_basis not in REVIEW_BASES:
+        raise ValueError(f"article review line {line_number} has invalid review_basis")
+    if not all(
+        isinstance(value, str)
+        for value in (headline_support, no_signal_reason, uncertainty_reason)
+    ):
+        raise ValueError(f"article review line {line_number} has invalid protocol fields")
+    impact_flags = _validate_protocol_flags(
+        record.get("impact_flags", []),
+        field="impact_flags",
+        allowed=IMPACT_FLAGS,
+        line_number=line_number,
+    )
+    context_flags = _validate_protocol_flags(
+        record.get("context_flags", []),
+        field="context_flags",
+        allowed=CONTEXT_FLAGS,
+        line_number=line_number,
+    )
+
+    if decision == "uncertain":
+        if uncertainty_reason not in UNCERTAINTY_REASONS:
+            raise ValueError(
+                f"article review line {line_number} requires uncertainty_reason"
+            )
+        if headline_support or no_signal_reason or impact_flags or context_flags:
+            raise ValueError(
+                f"article review line {line_number} gives resolved fields to uncertain"
+            )
+        return
+
+    if review_basis == "unavailable":
+        raise ValueError(
+            f"article review line {line_number} gives unavailable basis to resolved decision"
+        )
+    if headline_support not in HEADLINE_SUPPORT_VALUES:
+        raise ValueError(
+            f"article review line {line_number} requires headline_support"
+        )
+    if review_basis == "headline_only" and headline_support != "sufficient":
+        raise ValueError(
+            f"article review line {line_number} has inconsistent headline-only support"
+        )
+    if uncertainty_reason:
+        raise ValueError(
+            f"article review line {line_number} gives uncertainty_reason to resolved decision"
+        )
+    if decision == "not_flood_related":
+        if no_signal_reason not in NO_SIGNAL_REASONS:
+            raise ValueError(
+                f"article review line {line_number} requires no_signal_reason"
+            )
+    elif no_signal_reason:
+        raise ValueError(
+            f"article review line {line_number} gives no_signal_reason to another class"
+        )
+
+
 def _validate_review(record: Any, line_number: int) -> dict[str, Any]:
     if not isinstance(record, dict):
         raise ValueError(f"article review line {line_number} must be a JSON object")
@@ -182,7 +348,11 @@ def _validate_review(record: Any, line_number: int) -> dict[str, Any]:
     if not isinstance(article_id, str) or not ARTICLE_ID_PATTERN.fullmatch(article_id):
         raise ValueError(f"article review line {line_number} has an invalid article_id")
     schema_version = record.get("decision_schema_version", 1)
-    if isinstance(schema_version, bool) or not isinstance(schema_version, int):
+    if (
+        isinstance(schema_version, bool)
+        or not isinstance(schema_version, int)
+        or schema_version not in {0, 1, 2}
+    ):
         raise ValueError(
             f"article review line {line_number} has an invalid decision_schema_version"
         )
@@ -193,6 +363,12 @@ def _validate_review(record: Any, line_number: int) -> dict[str, Any]:
         raise ValueError(f"article review line {line_number} has an invalid schema-v1 decision")
     if schema_version == 2 and decision not in V2_LABELS:
         raise ValueError(f"article review line {line_number} has an invalid schema-v2 decision")
+    _validate_review_protocol(
+        record,
+        decision=decision,
+        schema_version=1 if schema_version == 0 else schema_version,
+        line_number=line_number,
+    )
     tags = record.get("tags", [])
     if tags is None:
         tags = []
@@ -211,9 +387,18 @@ def _validate_review(record: Any, line_number: int) -> dict[str, Any]:
         value = record.get(key)
         if not isinstance(value, str) or len(value) > limit:
             raise ValueError(f"article review line {line_number} has an invalid {key}")
+    title_source = record.get("title_source", "")
+    if not isinstance(title_source, str) or title_source not in REVIEW_TITLE_SOURCES:
+        raise ValueError(
+            f"article review line {line_number} has an invalid title_source"
+        )
     normalized = dict(record)
     normalized["decision_schema_version"] = 1 if schema_version == 0 else schema_version
-    normalized["tags"] = tags
+    if int(normalized.get("review_protocol_version", 0)) == REVIEW_PROTOCOL_VERSION:
+        normalized.pop("tags", None)
+    else:
+        normalized["tags"] = tags
+    normalized["title_source"] = title_source
     return normalized
 
 
@@ -259,12 +444,31 @@ def _normalize_publisher_group(value: Any) -> str | None:
     return candidate
 
 
-def _archive_text(row: dict[str, Any], title_source_column: str | None) -> tuple[str | None, str]:
+def _archive_text(
+    row: dict[str, Any],
+    title_source_column: str | None,
+    review: dict[str, Any] | None = None,
+) -> tuple[str | None, str]:
     canonical_url = str(row.get("canonical_url") or "")
     if title_source_column and row.get(title_source_column) in PUBLISHER_METADATA_SOURCES:
         title = normalize_publisher_title(row.get("publisher_title"), canonical_url)
         if title:
             return title, "publisher_metadata"
+    # A review display title is model input only when its provenance and archive
+    # binding prove that the same publisher-metadata acquisition path produced it.
+    # Manual overrides, unavailable titles, missing provenance, and stored URL-path
+    # display text remain audit evidence only.
+    if review and review.get("title_source") == "publisher_metadata":
+        archive_publisher = _normalize_publisher_group(row.get("source_domain"))
+        review_publisher = _normalize_publisher_group(review.get("source_domain"))
+        if (
+            review.get("url") == canonical_url
+            and archive_publisher
+            and review_publisher == archive_publisher
+        ):
+            title = normalize_publisher_title(review.get("title"), canonical_url)
+            if title:
+                return title, "review_publisher_metadata"
     # URL-path text is generated by the same deterministic code available at
     # live inference. Unproven archive publisher titles and manual overrides are
     # intentionally not used.
@@ -354,6 +558,12 @@ def prepare_native_articles(review_path: Path, archive_path: Path) -> PreparedAr
         if decision not in CLASS_SET:
             exclusions["unsupported_schema_or_label"] += 1
             continue
+        if (
+            int(review.get("review_protocol_version", 0)) == REVIEW_PROTOCOL_VERSION
+            and review.get("headline_support") != "sufficient"
+        ):
+            exclusions["headline_not_sufficient"] += 1
+            continue
         resolved_v2_count += 1
         labels_before_text[decision] += 1
         archived = archive_by_id.get(str(review["article_id"]))
@@ -376,7 +586,7 @@ def prepare_native_articles(review_path: Path, archive_path: Path) -> PreparedAr
         if not isinstance(story_group, str) or not story_group.strip():
             exclusions["missing_story_group"] += 1
             continue
-        text, text_source = _archive_text(archived, title_source_column)
+        text, text_source = _archive_text(archived, title_source_column, review)
         if not text:
             exclusions["missing_inference_text"] += 1
             continue
@@ -428,6 +638,8 @@ def prepare_native_articles(review_path: Path, archive_path: Path) -> PreparedAr
             "review_time_used_as_feature_or_split_key": False,
             "title_source_column": title_source_column,
             "unproven_publisher_titles_used": False,
+            "review_publisher_titles_require_exact_archive_url_and_domain": True,
+            "unproven_review_titles_used": False,
             "manual_override_titles_used": False,
             "url_path_fallback_uses_live_inference_code": True,
         },

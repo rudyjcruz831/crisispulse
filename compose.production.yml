@@ -31,7 +31,9 @@ services:
       - crisis_work:/work
       - caddy_data:/caddy-data
       - caddy_config:/caddy-config
-      - ./backups:/backups
+      - type: bind
+        source: ${CRISISPULSE_BACKUP_DIR:-./backups}
+        target: /backups
 
   caddy:
     build:
@@ -104,7 +106,10 @@ services:
       - ${CRISISPULSE_PUBLIC_ORIGIN:-http://localhost:8088},${CRISISPULSE_LOCAL_PREVIEW_ORIGIN:-http://localhost:3000}
     volumes:
       - crisis_state:/var/lib/crisispulse
-      - ./backups:/var/lib/crisispulse-backups:ro
+      - type: bind
+        source: ${CRISISPULSE_BACKUP_DIR:-./backups}
+        target: /var/lib/crisispulse-backups
+        read_only: true
     depends_on:
       init-volumes:
         condition: service_completed_successfully
@@ -160,6 +165,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.refresh
+    # Keep refresh work responsive alongside the desktop app. This is a hard
+    # container CPU ceiling; --workers remains the pipeline concurrency knob.
+    cpus: "${CRISISPULSE_REFRESH_CPUS:-8.0}"
     command:
       - --raw-dir
       - /var/lib/crisispulse/raw
@@ -206,7 +214,9 @@ services:
     volumes:
       - crisis_state:/state:ro
       - crisis_work:/work:ro
-      - ./backups:/backups
+      - type: bind
+        source: ${CRISISPULSE_BACKUP_DIR:-./backups}
+        target: /backups
     depends_on:
       init-volumes:
         condition: service_completed_successfully
@@ -228,7 +238,10 @@ services:
     volumes:
       - crisis_state:/state
       - crisis_work:/work
-      - ./backups:/backups:ro
+      - type: bind
+        source: ${CRISISPULSE_BACKUP_DIR:-./backups}
+        target: /backups
+        read_only: true
     depends_on:
       init-volumes:
         condition: service_completed_successfully

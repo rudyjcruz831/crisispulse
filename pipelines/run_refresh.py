@@ -717,6 +717,7 @@ def run_refresh(
         article_archive_path,
         quality_sample_path,
         title_cache_path=dashboard_output.with_name("publisher-title-cache.json"),
+        review_path=dashboard_output.with_name("article-reviews.jsonl"),
     )
     build_review_set(clean_path, review_dir / "flood_manual_review.csv", size=40)
     build_features(clean_path, feature_path)

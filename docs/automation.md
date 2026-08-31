@@ -53,7 +53,7 @@ Removing the task stops future scheduled runs but does not delete raw data, comp
 
 ## Linux production timer
 
-The optional single-server package uses the same 15-minute overlap and retention rules through `pipelines.run_refresh`. It runs as a one-shot container with an advisory state lock and atomic status/dashboard writes. A systemd timer invokes the container every 15 minutes with `Persistent=true`, so a missed run is started after the server returns. See [the production deployment guide](production-deployment.md) for installation and backup timers.
+The optional single-server package uses the same 15-minute overlap and retention rules through `pipelines.run_refresh`. It runs as a one-shot container with an advisory state lock, atomic status/dashboard writes, and the CPU ceiling configured by `CRISISPULSE_REFRESH_CPUS`. A systemd timer invokes the container every 15 minutes with `Persistent=true`, so a missed run is started after the server returns. See [the production deployment guide](production-deployment.md) for installation and backup timers.
 
 ## Storage and failure behavior
 

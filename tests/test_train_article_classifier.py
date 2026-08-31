@@ -48,11 +48,30 @@ def _review(
     }
 
 
+def _protocol_review(
+    article_id: str,
+    decision: str,
+    reviewed_at: datetime,
+    *,
+    headline_support: str = "sufficient",
+) -> dict[str, object]:
+    review = _review(article_id, decision, reviewed_at)
+    review.pop("tags")
+    review.update(
+        review_protocol_version=1,
+        review_basis="full_article",
+        headline_support=headline_support,
+        impact_flags=[],
+        context_flags=[],
+    )
+    return review
+
+
 def _write_reviews(path: Path, reviews: list[dict[str, object]]) -> None:
     normalized = []
     for review in reviews:
         value = dict(review)
-        if value.get("tags") is None:
+        if "tags" in value and value["tags"] is None:
             value.pop("tags")
         normalized.append(json.dumps(value))
     path.write_text("\n".join(normalized) + "\n", encoding="utf-8")
@@ -150,6 +169,175 @@ def test_readiness_uses_latest_decision_and_reports_every_exclusion(tmp_path: Pa
     assert report["training_performed"] is False
     assert report["status"] == "not_ready"
     assert report["geography_summary"]["mappable_rows"] == 0
+
+
+def test_protocol_reviews_require_headline_support_for_training(tmp_path: Path) -> None:
+    reviews_path = tmp_path / "article-reviews.jsonl"
+    archive_path = tmp_path / "articles.parquet"
+    now = datetime(2026, 8, 25, tzinfo=UTC)
+    sufficient_id = _article_id("protocol-sufficient")
+    body_required_id = _article_id("protocol-body-required")
+    _write_reviews(
+        reviews_path,
+        [
+            _protocol_review(sufficient_id, "reported_flooding", now),
+            _protocol_review(
+                body_required_id,
+                "reported_flooding",
+                now + timedelta(minutes=1),
+                headline_support="body_required",
+            ),
+        ],
+    )
+    _write_archive(
+        archive_path,
+        [
+            {
+                "article_id": sufficient_id,
+                "seen_at": now,
+                "canonical_url": "https://one.example/flooding-closes-road",
+                "source_domain": "one.example",
+                "duplicate_group_id": "protocol-story-1",
+                "publisher_title": "Flooding closes road",
+            },
+            {
+                "article_id": body_required_id,
+                "seen_at": now + timedelta(minutes=1),
+                "canonical_url": "https://two.example/flooding-context-requires-body",
+                "source_domain": "two.example",
+                "duplicate_group_id": "protocol-story-2",
+                "publisher_title": "Flooding context requires body",
+            },
+        ],
+    )
+
+    report, prepared, _split = build_readiness_report(reviews_path, archive_path)
+
+    assert report["latest_review_count"] == 2
+    assert report["resolved_schema_v2_count"] == 1
+    assert report["usable_training_rows"] == 1
+    assert report["exclusion_counts"]["headline_not_sufficient"] == 1
+    assert [row.article_id for row in prepared.rows] == [sufficient_id]
+
+
+def test_protocol_review_rejects_free_form_tags_and_duplicate_flags(tmp_path: Path) -> None:
+    path = tmp_path / "article-reviews.jsonl"
+    now = datetime(2026, 8, 25, tzinfo=UTC)
+    review = _protocol_review(_article_id("invalid-protocol"), "reported_flooding", now)
+    review["tags"] = []
+    _write_reviews(path, [review])
+    with pytest.raises(ValueError, match="free-form tags"):
+        load_latest_native_reviews(path)
+
+    review.pop("tags")
+    review["impact_flags"] = ["fatality", "fatality"]
+    _write_reviews(path, [review])
+    with pytest.raises(ValueError, match="impact_flags"):
+        load_latest_native_reviews(path)
+
+
+def test_readiness_uses_exactly_bound_publisher_metadata_from_review(
+    tmp_path: Path,
+) -> None:
+    reviews_path = tmp_path / "article-reviews.jsonl"
+    archive_path = tmp_path / "articles.parquet"
+    now = datetime(2026, 8, 25, tzinfo=UTC)
+    article_id = _article_id("review-publisher-title")
+    opaque_url = "https://www.publisher.example/articles/20260825/4488671.html"
+    review = _review(article_id, "flood_risk_warning", now)
+    review.update(
+        title="Publisher headline available at live inference",
+        title_source="publisher_metadata",
+        url=opaque_url,
+        source_domain="www.publisher.example",
+    )
+    _write_reviews(reviews_path, [review])
+    _write_archive(
+        archive_path,
+        [{
+            "article_id": article_id,
+            "seen_at": now,
+            "canonical_url": opaque_url,
+            "source_domain": "publisher.example",
+            "duplicate_group_id": "story-publisher-title",
+            "publisher_title": None,
+        }],
+    )
+
+    report, prepared, _split = build_readiness_report(reviews_path, archive_path)
+
+    assert report["exclusion_counts"] == {}
+    assert len(prepared.rows) == 1
+    assert prepared.rows[0].text == "Publisher headline available at live inference"
+    assert prepared.rows[0].text_source == "review_publisher_metadata"
+    assert prepared.safeguards[
+        "review_publisher_titles_require_exact_archive_url_and_domain"
+    ] is True
+    assert prepared.safeguards["unproven_review_titles_used"] is False
+
+
+@pytest.mark.parametrize(
+    ("title_source", "review_url", "review_domain"),
+    [
+        (None, "same", "same"),
+        ("", "same", "same"),
+        ("manual_override", "same", "same"),
+        ("unavailable", "same", "same"),
+        ("url_path", "same", "same"),
+        ("publisher_metadata", "different", "same"),
+        ("publisher_metadata", "same", "different"),
+    ],
+)
+def test_readiness_rejects_unproven_or_unbound_review_display_text(
+    tmp_path: Path,
+    title_source: str | None,
+    review_url: str,
+    review_domain: str,
+) -> None:
+    reviews_path = tmp_path / "article-reviews.jsonl"
+    archive_path = tmp_path / "articles.parquet"
+    now = datetime(2026, 8, 25, tzinfo=UTC)
+    article_id = _article_id(f"untrusted-{title_source}-{review_url}-{review_domain}")
+    opaque_url = "https://publisher.example/articles/20260825/4488671.html"
+    review = _review(article_id, "not_flood_related", now)
+    review["title"] = "Display text must not silently become model input"
+    review["url"] = (
+        opaque_url
+        if review_url == "same"
+        else "https://publisher.example/articles/20260825/9999999.html"
+    )
+    review["source_domain"] = (
+        "www.publisher.example" if review_domain == "same" else "other.example"
+    )
+    if title_source is not None:
+        review["title_source"] = title_source
+    _write_reviews(reviews_path, [review])
+    _write_archive(
+        archive_path,
+        [{
+            "article_id": article_id,
+            "seen_at": now,
+            "canonical_url": opaque_url,
+            "source_domain": "publisher.example",
+            "duplicate_group_id": "story-untrusted-title",
+            "publisher_title": None,
+        }],
+    )
+
+    report, prepared, _split = build_readiness_report(reviews_path, archive_path)
+
+    assert prepared.rows == []
+    assert report["exclusion_counts"] == {"missing_inference_text": 1}
+
+
+def test_native_review_loader_rejects_unknown_title_source(tmp_path: Path) -> None:
+    reviews_path = tmp_path / "article-reviews.jsonl"
+    review = _review(_article_id("bad-title-source"), "reported_flooding", datetime(2026, 8, 25, tzinfo=UTC))
+    review["title_source"] = "review_display_text"
+    _write_reviews(reviews_path, [review])
+
+    with pytest.raises(ValueError, match="invalid title_source"):
+        load_latest_native_reviews(reviews_path)
 
 
 def test_readiness_accepts_archive_without_optional_geography_columns(

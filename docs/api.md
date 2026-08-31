@@ -30,7 +30,7 @@ The default address is `http://127.0.0.1:8080`, and the default allowed dashboar
 | `POST` | `/api/v1/reviews` | Append a validated review decision to the local audit log. |
 | `GET` | `/api/v1/reviews/summary` | Return label counts and sample-readiness metrics. |
 | `GET` | `/api/v1/reviews/export.csv` | Download the latest decision for each reviewed signal as CSV. |
-| `GET` | `/api/v1/quality/articles` | Return the current balanced daily article sample with any saved decisions. |
+| `GET` | `/api/v1/quality/articles` | Return the current review-aware Smart Review Queue, sampling intent, and any saved decisions. |
 | `POST` | `/api/v1/quality/articles` | Append a validated relevance decision for an article in the current sample. |
 | `GET` | `/api/v1/quality/articles/summary` | Return guarded article-filter quality measurements and review progress. |
 | `GET` | `/api/v1/quality/articles/export.csv` | Download the latest article relevance decision per article as CSV. |
@@ -74,13 +74,37 @@ The summary counts only the latest decision for each stable signal ID. `confirme
 
 ### Article-filter quality
 
-The daily sample contains 24 safe publisher links drawn deterministically from recent permanent history: eight strong matches, eight weak headline conflicts, and eight other ambiguous matches when each group has enough rows. Version 2 article-review `POST` requests accept exactly `reported_flooding`, `flood_risk_warning`, `heavy_rain_only`, `not_flood_related`, or `uncertain` for an article in the current sample. They may also carry up to eight optional custom context tags. The server normalizes each tag to a distinct lowercase Unicode letter/digit slug of at most 32 characters, writes `decision_schema_version: 2`, and copies the system classification from the server-side sample rather than trusting browser-supplied metadata.
+The Smart Review Queue contains up to 24 safe publisher links from distinct story groups, drawn deterministically from recent permanent history. It preserves unfinished cards during the UTC day, removes completed version-2 decisions, replenishes open positions after a refresh, and prioritizes legacy re-labeling plus the class, chronological-split, date, publisher, and inference-text gaps blocking the first local CPU smoke test. When authoritative readiness is unavailable it falls back to the earlier balanced strong-match, headline-conflict, and ambiguous-match order.
 
-The labels follow a fixed precedence: reported physical flooding first; otherwise an explicit flood forecast, watch, warning, or risk; otherwise heavy rain or severe weather without explicit flood evidence; otherwise not flood-related. `uncertain` is reserved for unavailable, contradictory, or insufficient evidence. The first four labels are resolved training classes. `uncertain` is retained but excluded from rate denominators.
+The response's top-level `selection_intent` describes the current dataset and active thresholds. Each article can include a ranked `selection_intent` with an estimated `sampling_split` and neutral selection reasons. Internal class-balancing guesses are intentionally omitted so the API and dashboard cannot anchor the human reviewer. Version 1 sample files remain readable during deployment rollover, while version 2 metadata is strictly validated before the API returns it. A valid version 2 response may contain an empty `articles` array when the current queue is complete.
+
+Version 2 article-review `POST` requests accept exactly `reported_flooding`, `flood_risk_warning`, `heavy_rain_only`, `not_flood_related`, or `uncertain` for an article in the current sample. Every new request must send `review_protocol_version: 1`; this does not change `decision_schema_version: 2` or add a fifth resolved target. The server copies article identity, evidence, and `title_source` provenance from the server-side sample rather than trusting browser-supplied metadata. Older records without protocol or title provenance remain readable.
+
+A resolved protocol-1 request is shaped like:
+
+```json
+{
+  "article_id": "0000000000000000000000000000000000000000000000000000000000000000",
+  "decision": "reported_flooding",
+  "review_protocol_version": 1,
+  "review_basis": "full_article",
+  "headline_support": "sufficient",
+  "impact_flags": ["transport_disruption"],
+  "context_flags": ["aftermath_recovery"]
+}
+```
+
+`review_basis` is required on every protocol-1 review and must be `full_article`, `publisher_summary`, `headline_only`, or `unavailable`. `unavailable` is restricted to `uncertain`. `headline_support` is required on each resolved decision and must be `sufficient`, `body_required`, or `conflicts_with_body`; it is forbidden on `uncertain`, and a resolved `headline_only` review must be `sufficient`.
+
+`not_flood_related` additionally requires exactly one `no_signal_reason`: `flood_context_analysis`, `other_weather_non_flood`, or `unrelated_false_match`. `uncertain` instead requires exactly one `uncertainty_reason`: `access_blocked`, `page_unavailable`, `wrong_or_junk_page`, `multi_story_page`, `language_barrier`, or `insufficient_or_conflicting`. Each reason field is forbidden on every other decision.
+
+Resolved requests may include unique closed-vocabulary arrays. `impact_flags` accepts `fatality`, `injury`, `evacuation_displacement`, `rescue_search`, `property_crop_damage`, `transport_disruption`, and `utility_disruption`. `context_flags` accepts `aftermath_recovery`, `climate_background`, `historical_background`, and `policy_preparedness`. Both arrays are forbidden on `uncertain`; an omitted flag is unrecorded, not confirmed absent. Protocol-1 requests reject the historical free-form `tags` field. Existing records with tags remain readable and exportable but are not silently converted to controlled flags.
+
+The labels follow a fixed precedence for the main article's central claim: reported physical flooding first; otherwise an explicit flood forecast, watch, warning, or risk; otherwise heavy rain or severe weather without explicit flood evidence; otherwise no actionable flood/rain signal. Incidental historical mentions and surrounding page cards do not invoke precedence. `uncertain` is reserved for a recorded access, page, language, structure, or evidence limitation. The first four labels are resolved classes. `uncertain` is retained but excluded from rate denominators. Human review is blind to internal guessed classes and model predictions; see [the article review protocol](article-review-protocol.md).
 
 Historical records with no schema-version field are version 1 and may contain `relevant`, `not_relevant`, or `uncertain`. They remain in the append-only audit log and are not silently converted into detailed classes. The CSV contains the latest decision per article, so an unsuperseded version 1 answer remains visible there while a corrected article exports its current version 2 answer. The current sample presents version 1 answers for re-review. A new version 2 answer appends a correction and becomes the latest decision without deleting the older audit record.
 
-Strong-match and blocked-match flood-related rates count `reported_flooding` plus `flood_risk_warning` in the numerator. They remain `null` until at least 20 version 2 decisions are resolved and both the strong and blocked strata contain at least five resolved reviews. The sample is deliberately balanced, so its combined class share is not an estimate of production prevalence or overall accuracy. Custom tags are secondary context rather than measurement classes and do not change alerts or rate calculations. The quality CSV is a versioned latest-label audit export and includes pipe-separated tags; the separate Training Data Lab view below adds explicit training eligibility. Neither export is consumed by an automatic model-training job.
+Strong-match and blocked-match flood-related rates count `reported_flooding` plus `flood_risk_warning` in the numerator. They remain `null` until at least 20 version 2 decisions are resolved and both the strong and blocked strata contain at least five resolved reviews. The sample is deliberately balanced, so its combined class share is not an estimate of production prevalence or overall accuracy. Protocol fields and controlled flags are secondary audit/slice data; they do not change alerts or enter rate calculations. The quality CSV is a versioned latest-label audit export; the separate Training Data Lab view below adds explicit training eligibility. Neither export is consumed by an automatic model-training job.
 
 ### Training Data Lab
 
@@ -108,13 +132,18 @@ Strong-match and blocked-match flood-related rates count `reported_flooding` plu
     {
       "article_id": "0000000000000000000000000000000000000000000000000000000000000000",
       "title": "Flood closes local road",
+      "title_source": "publisher_metadata",
       "url": "https://news.example/flood-closes-road",
       "source_domain": "news.example",
       "match_strength": "high",
       "review_bucket": "high_match",
       "decision": "reported_flooding",
       "decision_schema_version": 2,
-      "tags": ["road-closure"],
+      "review_protocol_version": 1,
+      "review_basis": "full_article",
+      "headline_support": "sufficient",
+      "impact_flags": ["transport_disruption"],
+      "context_flags": [],
       "reviewed_at": "2026-08-24T12:00:00Z",
       "training_eligible": true,
       "exclusion_reason": ""
@@ -128,15 +157,20 @@ Eligibility is deterministic and does not imply that the sample is large enough 
 - Version 2 `reported_flooding`, `flood_risk_warning`, `heavy_rain_only`, and `not_flood_related` decisions are eligible. `class_counts` counts only these eligible latest labels and always includes all four class keys, including zero counts.
 - A version 2 `uncertain` decision is excluded with `exclusion_reason: "uncertain"`.
 - A version 1 decision is excluded with `exclusion_reason: "legacy_schema"`, including historical records that originally omitted the schema-version field.
+- A resolved protocol-1 decision with `headline_support: "body_required"` or `"conflicts_with_body"` is excluded from the current headline-only model with `exclusion_reason: "headline_not_sufficient"`.
 - Every article row includes `training_eligible` and `exclusion_reason`. Eligible rows use an empty exclusion reason. `summary.total_articles` includes eligible and excluded rows.
 
-`GET /api/v1/training/articles/export.csv` exports the same latest-label audit population, including excluded rows. Its columns are `article_id`, `title`, `url`, `source_domain`, `match_strength`, `review_bucket`, `decision`, `decision_schema_version`, `reviewed_at`, `tags`, `training_eligible`, and `exclusion_reason`. Tags are pipe-separated. The file uses a UTF-8 byte-order mark and CRLF rows for Excel compatibility. Cells derived from publisher or reviewer data are protected against spreadsheet formula execution: dangerous leading `=`, `+`, `-`, `@`, tab, or carriage-return characters are prefixed with an apostrophe. Both training endpoints use `Cache-Control: no-store`; the CSV export does not modify review history.
+`GET /api/v1/training/articles/export.csv` exports the same latest-label audit population, including excluded rows. To preserve spreadsheet compatibility, its original 13 columns keep their positions and the protocol columns are appended. The exact order is `article_id`, `title`, `title_source`, `url`, `source_domain`, `match_strength`, `review_bucket`, `decision`, `decision_schema_version`, `reviewed_at`, `tags`, `training_eligible`, `exclusion_reason`, `review_protocol_version`, `review_basis`, `headline_support`, `no_signal_reason`, `uncertainty_reason`, `impact_flags`, and `context_flags`.
+
+The article-quality CSV follows the same append-only evolution. Its exact order is `article_id`, `title`, `title_source`, `url`, `source_domain`, `match_strength`, `review_bucket`, `decision`, `decision_schema_version`, `reviewed_at`, `tags`, `review_protocol_version`, `review_basis`, `headline_support`, `no_signal_reason`, `uncertainty_reason`, `impact_flags`, and `context_flags`. Array values are pipe-separated. Historical tags remain present only for backward-compatible audit.
+
+CSV files use a UTF-8 byte-order mark and CRLF rows for Excel compatibility. Cells derived from publisher or reviewer data are protected against spreadsheet formula execution: dangerous leading `=`, `+`, `-`, `@`, tab, or carriage-return characters are prefixed with an apostrophe. Both training endpoints use `Cache-Control: no-store`; the CSV export does not modify review history.
 
 ### Training status
 
-`GET /api/v1/training/status` reads the fixed `article-baseline-report.json` file beside the configured review log and returns only fields needed by the Training Data Lab. The response includes the report status and creation time, whether fitting actually happened, an evaluation tier when applicable, review/resolved/usable counts, exclusions, four-class counts before and after inference-text filtering, sanitized chronological split metadata and class counts, and the production and non-evaluative smoke-test gates. Private input paths, prediction paths, runtime details, fingerprints, model metrics, and arbitrary report fields are not returned.
+`GET /api/v1/training/status` reads the fixed `article-baseline-report.json` file beside the configured review log and returns only fields needed by the Training Data Lab. The response includes the report status and creation time, whether fitting actually happened, an evaluation tier when applicable, the dataset fingerprint, review/resolved/usable counts, exclusions, four-class counts before and after inference-text filtering, sanitized chronological split metadata and class counts, and the production and non-evaluative smoke-test gates. A validated trained report also includes an optional `results` object containing the fixed model type and feature count, bounded CPU/runtime metadata, validation and test evaluation summaries, dummy and frozen-rule baselines, abstention counts, and at most eight aggregate off-diagonal confusion pairs under `representative_mistakes`. Private input and prediction paths, test slices, article text, article identifiers, URLs, and arbitrary report fields are not returned.
 
-The report is capped at 512 KiB and must use report schema 1 and the native CrisisPulse article-review contract. Counts, class keys, exclusion reasons, split boundaries and leakage flags, fixed gate names/minimums, gate outcomes, readiness states, and training status must agree with one another. A missing report returns `404` with `training status report not found`. Empty, oversized, malformed, unsupported, or internally inconsistent reports fail closed with `503` and the fixed public message `training status report unavailable`; details remain only in private API logs. The endpoint accepts only `GET` and `HEAD` and uses `Cache-Control: no-store`.
+The report is capped at 512 KiB and must use a supported report schema (currently 1 or 2) and the native CrisisPulse article-review contract. Counts, class keys, exclusion reasons, split boundaries and leakage flags, fixed gate names/minimums, gate outcomes, readiness states, and training status must agree with one another. For trained reports, every published score and support count must also agree with the fixed-order confusion matrices and split counts; runtime and abstention metadata are similarly bounded and cross-checked. A missing report returns `404` with `training status report not found`. Empty, oversized, malformed, unsupported, or internally inconsistent reports fail closed with `503` and the fixed public message `training status report unavailable`; details remain only in private API logs. The endpoint accepts only `GET` and `HEAD` and uses `Cache-Control: no-store`.
 
 A readiness-only report with too little data returns a summary shaped like:
 
